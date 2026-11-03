@@ -48,7 +48,8 @@ import {
   CornerDownRight,
   X,
   FolderOpen,
-  FileText
+  FileText,
+  RotateCw
 } from 'lucide-react';
 
 import {
@@ -94,6 +95,10 @@ const SX = BUILDING.width / LEGACY_W;
 const SY = BUILDING.depth / LEGACY_H;
 const inMeters = (v: number, k: number) => Math.round(v * k * 100) / 100;
 const TOTAL_AREA = INITIAL_ROOMS.reduce((s, r) => s + (r.area || 0), 0);
+
+// Центр вращения плана (180°) в координатах холста
+const ROT_CX = (BUILDING.width / 2) * SCALE;
+const ROT_CY = (BUILDING.minY + BUILDING.height / 2) * SCALE;
 
 // Слои проекта (объединяют управление видимостью, блокировкой и цветовую легенду)
 const INITIAL_LAYERS = [
@@ -299,6 +304,7 @@ export default function App() {
   const [showWifiHeatmap, setShowWifiHeatmap] = useState(SAVED?.showWifiHeatmap ?? true);
   const [showRoomLabels, setShowRoomLabels] = useState(SAVED?.showRoomLabels ?? true);
   const [showDimensions, setShowDimensions] = useState(SAVED?.showDimensions ?? true);
+  const [planRotated, setPlanRotated] = useState(SAVED?.planRotated ?? false);
 
   // Поповеры в шапке
   const [showCalibrationModal, setShowCalibrationModal] = useState(false);
@@ -392,6 +398,7 @@ export default function App() {
         setRulerPoints(null);
       }
       if (key === 't') setActiveTool('note');
+      if (key === 'r') setPlanRotated((v) => !v);
       if (key === 'escape') {
         setCableStartNodeId(null);
         setRulerPoints(null);
@@ -410,8 +417,12 @@ export default function App() {
   const clientToMeters = (clientX, clientY) => {
     if (!svgRef.current) return { x: 0, y: 0 };
     const rect = svgRef.current.getBoundingClientRect();
-    const pxX = (clientX - rect.left - pan.x - calibration.offsetX) / (zoom * calibration.scaleX);
-    const pxY = (clientY - rect.top - pan.y - calibration.offsetY) / (zoom * calibration.scaleY);
+    let pxX = (clientX - rect.left - pan.x - calibration.offsetX) / (zoom * calibration.scaleX);
+    let pxY = (clientY - rect.top - pan.y - calibration.offsetY) / (zoom * calibration.scaleY);
+    if (planRotated) {
+      pxX = 2 * ROT_CX - pxX;
+      pxY = 2 * ROT_CY - pxY;
+    }
     return {
       x: Math.round((pxX / SCALE) * 20) / 20, // шаг привязки 5 см (0.05 м)
       y: Math.round((pxY / SCALE) * 20) / 20
@@ -494,10 +505,16 @@ export default function App() {
       screenOf: (x: number, y: number) => {
         const r = svgRef.current?.getBoundingClientRect();
         if (!r) return { x: 0, y: 0 };
-        return { x: r.left + pan.x + x * SCALE * zoom, y: r.top + pan.y + y * SCALE * zoom };
+        let px = x * SCALE;
+        let py = y * SCALE;
+        if (planRotated) {
+          px = 2 * ROT_CX - px;
+          py = 2 * ROT_CY - py;
+        }
+        return { x: r.left + pan.x + px * zoom, y: r.top + pan.y + py * zoom };
       },
     };
-  }, [nodes, cables, walls, layers, notes, projectTitle, darkMode, zoom, pan]);
+  }, [nodes, cables, walls, layers, notes, projectTitle, darkMode, zoom, pan, planRotated]);
 
   // --- Обработчики мыши на холсте ---
   const handleCanvasMouseDown = (e) => {
@@ -801,7 +818,7 @@ export default function App() {
             projectTitle, nodes, cables, walls, layers, notes, activeLayerId,
             darkMode, planFilter, underlayOpacity, calibration,
             showGrid, showRoomLabels, showDimensions, showWifiHeatmap,
-            zoom, pan,
+            zoom, pan, planRotated,
             savedAt: new Date().toISOString(),
           })
         );
@@ -813,7 +830,7 @@ export default function App() {
   }, [
     projectTitle, nodes, cables, walls, layers, notes, activeLayerId,
     darkMode, planFilter, underlayOpacity, calibration,
-    showGrid, showRoomLabels, showDimensions, showWifiHeatmap, zoom, pan,
+    showGrid, showRoomLabels, showDimensions, showWifiHeatmap, zoom, pan, planRotated,
   ]);
 
   // Экспорт кабельного журнала и спецификации в CSV
@@ -868,7 +885,7 @@ export default function App() {
       version: 2,
       projectTitle, nodes, cables, walls, layers, notes, activeLayerId,
       darkMode, planFilter, underlayOpacity, calibration,
-      showGrid, showRoomLabels, showDimensions, showWifiHeatmap, zoom, pan,
+      showGrid, showRoomLabels, showDimensions, showWifiHeatmap, zoom, pan, planRotated,
       exportedAt: new Date().toISOString(),
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -904,6 +921,7 @@ export default function App() {
         if (typeof data.underlayOpacity === 'number') setUnderlayOpacity(data.underlayOpacity);
         if (data.calibration) setCalibration(data.calibration);
         if (typeof data.zoom === 'number') setZoom(data.zoom);
+        if (typeof data.planRotated === 'boolean') setPlanRotated(data.planRotated);
         if (data.pan) setPan(data.pan);
         triggerToast('Проект загружен из JSON');
       } catch {
@@ -1801,7 +1819,7 @@ export default function App() {
               <g
                 transform={`translate(${pan.x + calibration.offsetX}, ${pan.y + calibration.offsetY}) scale(${
                   zoom * calibration.scaleX
-                }, ${zoom * calibration.scaleY})`}
+                }, ${zoom * calibration.scaleY}) rotate(${planRotated ? 180 : 0} ${ROT_CX} ${ROT_CY})`}
               >
                 {/* 1. Сетка 1х1 метр */}
                 {showGrid && (
@@ -2291,6 +2309,16 @@ export default function App() {
                   : 'bg-white/90 border-slate-200/90 text-slate-700'
               }`}
             >
+              <button
+                onClick={() => setPlanRotated((v) => !v)}
+                className={`p-1.5 rounded-lg text-xs transition cursor-pointer ${
+                  planRotated ? 'bg-blue-600/15 text-blue-600 font-semibold' : 'hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+                title="Перевернуть чертёж на 180° (R)"
+              >
+                <RotateCw className="w-3.5 h-3.5" />
+              </button>
+              <div className="h-4 w-px bg-slate-200 dark:bg-slate-800 mx-0.5" />
               <button
                 onClick={() => setShowGrid(!showGrid)}
                 className={`p-1.5 rounded-lg text-xs transition cursor-pointer ${

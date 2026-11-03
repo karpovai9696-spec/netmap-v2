@@ -52,3 +52,4 @@ python tools/e2e_v2.py
 ## Стек
 
 React 18, TypeScript, Vite, Tailwind CSS 3, lucide-react. Без бэкенда — статика.
+
