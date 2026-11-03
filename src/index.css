@@ -1,0 +1,80 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #09090a;
+  color: #fff5b8;
+  font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* фирменное выделение из визитки */
+::selection {
+  background: #fcd116;
+  color: #09090a;
+}
+
+/* аккуратные скроллбары */
+* {
+  scrollbar-width: thin;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(142, 117, 29, 0.45);
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* элементы управления в фирменном жёлтом */
+input[type='range'],
+input[type='checkbox'] {
+  accent-color: #fcd116;
+}
+input:focus-visible,
+select:focus-visible,
+button:focus-visible {
+  outline: 2px solid rgba(252, 209, 22, 0.55);
+  outline-offset: 1px;
+}
+
+/* точечная «cyber»-сетка визитки */
+.dot-grid {
+  background-image: radial-gradient(rgba(252, 209, 22, 0.14) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+/* техническая подпись-«надзаголовок» как в визитке */
+.eyebrow {
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 10.5px;
+  color: #8f8a6e;
+}
+
+/* деликатное жёлтое свечение */
+.glow-primary {
+  box-shadow: 0 0 0 1px rgba(252, 209, 22, 0.28), 0 0 26px rgba(252, 209, 22, 0.14);
+}
+
+/* карточки-панели */
+.panel-card {
+  background: #0f0f11;
+  border: 1px solid #26251d;
+}
+
+/* жёлтые CTA: тёмный текст из визитки */
+.bg-blue-600, .hover\:bg-blue-700:hover { color: #09090A !important; }
