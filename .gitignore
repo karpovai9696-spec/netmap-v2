@@ -2,3 +2,11 @@ node_modules/
 dist/
 *.local
 .DS_Store
+
+# локальные превью и референсы
+preview-*.png
+ref-portfolio-*.png
+crop-header.png
+
+# одноразовые патч-скрипты
+tools/patch_*.py
