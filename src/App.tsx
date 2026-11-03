@@ -2270,16 +2270,6 @@ export default function App() {
                             strokeDasharray="5,4"
                           />
                         ))}
-                        <text
-                          x={c[0] * SCALE}
-                          y={c[1] * SCALE}
-                          textAnchor="middle"
-                          fontSize="10.5"
-                          fill={darkMode ? '#B9B28F' : '#6B6552'}
-                          className="font-medium"
-                        >
-                          {ext.name}
-                        </text>
                       </g>
                     );
                   })}
@@ -2302,55 +2292,9 @@ export default function App() {
                             data-bg="true"
                           />
                         ))}
-
-                        {/* Подписи: № / площадь / название из паспорта */}
-                        {showRoomLabels && (
-                          <g
-                            transform={`translate(${room.label[0] * SCALE}, ${room.label[1] * SCALE})`}
-                            className="pointer-events-none"
-                          >
-                            <text x="0" y="-5" textAnchor="middle" fontSize="12" fontWeight="700"
-                              fill={darkMode ? '#FFF5B8' : '#2E2C1E'}>{room.num}</text>
-                            <line x1="-14" y1="-1" x2="14" y2="-1"
-                              stroke={darkMode ? '#8E751D' : '#6B6552'} strokeWidth="1.2" />
-                            <text x="0" y="11" textAnchor="middle" fontSize="11" fontWeight="600"
-                              fill={darkMode ? '#B9B28F' : '#6B6552'}>{room.area ?? ''}</text>
-                            {room.area !== null && room.area >= 7 && (
-                              <text x="0" y="23" textAnchor="middle" fontSize="10.5"
-                                fill={darkMode ? '#8F8A6E' : '#B9B28F'}>{room.name}</text>
-                            )}
-                          </g>
-                        )}
                       </g>
                     );
                   })}
-
-                  {/* Внешние размерные цепочки — реальные габариты проверенной модели */}
-                  {showDimensions && (
-                    <g className="pointer-events-none" fill={darkMode ? '#8F8A6E' : '#6B6552'} fontSize="10.5">
-                      <line
-                        x1={0}
-                        y1={(BUILDING.depth + 0.9) * SCALE}
-                        x2={BUILDING.width * SCALE}
-                        y2={(BUILDING.depth + 0.9) * SCALE}
-                        stroke={darkMode ? '#2E2C1E' : '#E6E0C2'}
-                        strokeWidth="1"
-                        strokeDasharray="3,3"
-                      />
-                      <text x={(BUILDING.width / 2) * SCALE} y={(BUILDING.depth + 1.35) * SCALE} textAnchor="middle" fontWeight="600">
-                        Общая длина здания: {BUILDING.width} м (пом. 1080 + пом. 1079)
-                      </text>
-                      <text
-                        x={-0.7 * SCALE}
-                        y={(BUILDING.depth / 2) * SCALE}
-                        textAnchor="middle"
-                        transform={`rotate(-90, ${-0.7 * SCALE}, ${(BUILDING.depth / 2) * SCALE})`}
-                        fontWeight="600"
-                      >
-                        Глубина: {BUILDING.depth} м
-                      </text>
-                    </g>
-                  )}
 
                   {/* СТЕНА И ПЕРЕГОРОДКИ (НЕСУЩИЕ + РЕДАКТИРУЕМЫЕ) */}
                   {walls.map((w) => {
@@ -2429,6 +2373,77 @@ export default function App() {
                       fillOpacity="0.85"
                     />
                   ))}
+                </g>
+
+                {/* 2b. ТЕКСТОВЫЙ СЛОЙ — вне групповой прозрачности, чтобы подписи были чёткими */}
+                <g className="pointer-events-none">
+                  {EXTERIOR_ENTRIES.map((ext) => {
+                    const parts: any[] = Array.isArray((ext.polygon as any)[0][0]) ? (ext.polygon as any) : [ext.polygon];
+                    const c = parts[0]
+                      .reduce((a: number[], p: number[]) => [a[0] + p[0], a[1] + p[1]], [0, 0])
+                      .map((v: number) => v / parts[0].length);
+                    return (
+                      <text
+                        key={ext.id}
+                        x={c[0] * SCALE}
+                        y={c[1] * SCALE}
+                        textAnchor="middle"
+                        fontSize="10.5"
+                        fill={darkMode ? '#B9B28F' : '#6B6552'}
+                        className="font-medium"
+                      >
+                        {ext.name}
+                      </text>
+                    );
+                  })}
+
+                  {/* Подписи помещений: № / площадь / название */}
+                  {showRoomLabels &&
+                    INITIAL_ROOMS.filter((r) => planFilter === 'unified' || r.premise === planFilter).map((room) => (
+                      <g
+                        key={`lbl-${room.id}`}
+                        transform={`translate(${room.label[0] * SCALE}, ${room.label[1] * SCALE}) scale(${1 / zoom})`}
+                      >
+                        <text x="0" y="-5" textAnchor="middle" fontSize="11" fontWeight="700"
+                          fill={darkMode ? '#FFF5B8' : '#2E2C1E'}>{room.num}</text>
+                        <line x1="-14" y1="-1" x2="14" y2="-1"
+                          stroke={darkMode ? '#8E751D' : '#6B6552'} strokeWidth="1.2" />
+                        <text x="0" y="10" textAnchor="middle" fontSize="10" fontWeight="600"
+                          fill={darkMode ? '#B9B28F' : '#6B6552'}>{room.area ?? ''}</text>
+                        {room.area !== null && room.area >= 7 && (
+                          <text x="0" y="21" textAnchor="middle" fontSize="9.5"
+                            fill={darkMode ? '#8F8A6E' : '#B9B28F'}>{room.name}</text>
+                        )}
+                      </g>
+                    ))}
+
+                  {/* Внешние размерные цепочки — реальные габариты проверенной модели */}
+                  {showDimensions && (
+                    <g className="pointer-events-none" fill={darkMode ? '#8F8A6E' : '#6B6552'} fontSize="10.5">
+                      <line
+                        x1={0}
+                        y1={(BUILDING.depth + 0.9) * SCALE}
+                        x2={BUILDING.width * SCALE}
+                        y2={(BUILDING.depth + 0.9) * SCALE}
+                        stroke={darkMode ? '#2E2C1E' : '#E6E0C2'}
+                        strokeWidth="1"
+                        strokeDasharray="3,3"
+                      />
+                      <text x={(BUILDING.width / 2) * SCALE} y={(BUILDING.depth + 1.35) * SCALE} textAnchor="middle" fontWeight="600">
+                        Общая длина здания: {BUILDING.width} м (пом. 1080 + пом. 1079)
+                      </text>
+                      <text
+                        x={-0.7 * SCALE}
+                        y={(BUILDING.depth / 2) * SCALE}
+                        textAnchor="middle"
+                        transform={`rotate(-90, ${-0.7 * SCALE}, ${(BUILDING.depth / 2) * SCALE})`}
+                        fontWeight="600"
+                      >
+                        Глубина: {BUILDING.depth} м
+                      </text>
+                    </g>
+                  )}
+
                 </g>
 
                 {/* 3. ТЕПЛОВАЯ КАРТА ПОКРЫТИЯ WI-FI (РАДИУСЫ ТОЧЕК ДОСТУПА AP) */}
@@ -2668,12 +2683,12 @@ export default function App() {
                       </foreignObject>
 
                       {/* Аккуратная подпись кода узла (не перекрывающая чертёж) */}
-                      <g transform="translate(0, 22)" className="pointer-events-none">
+                      <g transform={`translate(0, 22) scale(${1 / zoom})`} className="pointer-events-none">
                         <rect
-                          x="-27"
-                          y="-10"
-                          width="54"
-                          height="15"
+                          x="-25"
+                          y="-9"
+                          width="50"
+                          height="14"
                           rx="4"
                           fill={darkMode ? 'rgba(15,23,42,0.88)' : 'rgba(255,255,255,0.92)'}
                           stroke={isSelected ? '#FCD116' : 'rgba(148,163,184,0.4)'}
