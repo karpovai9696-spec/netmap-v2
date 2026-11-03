@@ -300,6 +300,28 @@ const RenderNodeIcon = ({ iconName, className = 'w-4 h-4' }) => {
   }
 };
 
+// ---------------------------- печать листа ------------------------------
+const PRINT_COLOR_MAP: Record<string, string> = {
+  '#09090A': '#FFFFFF', '#0F0F11': '#FFFFFF', '#101012': '#F8FAFC', '#17171A': '#F1F5F9',
+  '#FFF5B8': '#111827', '#FFF8D6': '#111827', '#FFFDF0': '#FFFFFF', '#E6E0C2': '#111827',
+  '#D8D2B4': '#334155', '#B9B28F': '#475569', '#8F8A6E': '#64748B', '#6B6552': '#64748B',
+  '#2E2C1E': '#CBD5E1', '#26251D': '#E5E7EB', '#1F1F23': '#E5E7EB',
+  '#FCD116': '#B45309', '#E3BC0E': '#B45309', '#F59E0B': '#B45309',
+  '#34D399': '#047857', '#FB7185': '#BE123C', '#EF4444': '#DC2626', '#A78BFA': '#6D28D9',
+  '#FB923C': '#C2410C', '#38BDF8': '#0369A1', '#fff': '#111827', '#FFFFFF': '#FFFFFF',
+  '#0f172a': '#111827', '#1e293b': '#E5E7EB', '#64748b': '#64748B', '#94a3b8': '#94A3B8',
+  'rgba(15,23,42,0.88)': '#FFFFFF', 'rgba(255,255,255,0.92)': '#FFFFFF',
+  'rgba(148,163,184,0.4)': '#94A3B8',
+};
+
+const printEsc = (v: unknown) =>
+  String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+function cleanupPrintSheet() {
+  document.body.classList.remove('printing');
+  document.getElementById('print-sheet')?.remove();
+}
+
 export default function App() {
   // --- Состояния интерфейса ---
   const [darkMode, setDarkMode] = useState(SAVED?.darkMode ?? true);
@@ -326,6 +348,7 @@ export default function App() {
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cursorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const collabRef = useRef<any>(null);
+  const printBuildRef = useRef<() => void>(() => {});
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [showPassword, setShowPassword] = useState(false);
 
@@ -484,6 +507,18 @@ export default function App() {
       { id: 'NOTE-2', x: 15.63, y: 1.4, text: 'Стык планов 1080 и 1079', layer: 'notes' },
     ];
   });
+
+  // Печать: перехват Ctrl+P и кнопки «Печать / PDF»
+  useEffect(() => {
+    const before = () => printBuildRef.current?.();
+    const after = () => cleanupPrintSheet();
+    window.addEventListener('beforeprint', before);
+    window.addEventListener('afterprint', after);
+    return () => {
+      window.removeEventListener('beforeprint', before);
+      window.removeEventListener('afterprint', after);
+    };
+  }, []);
 
   // локальные изменения -> операции для сервера
   useEffect(() => {
@@ -1165,6 +1200,126 @@ export default function App() {
     };
   }, [cables, nodes]);
 
+  // Построение печатного листа: только чертёж, рамка, штамп и легенда
+  const buildPrintSheet = () => {
+    cleanupPrintSheet();
+    const svgEl = svgRef.current;
+    const planRoot = svgEl?.querySelector('[data-plan-root="1"]') as SVGGElement | null;
+    if (!svgEl || !planRoot) return;
+
+    const NS = 'http://www.w3.org/2000/svg';
+    const defs = svgEl.querySelector('defs');
+    const clone = planRoot.cloneNode(true) as SVGGElement;
+    clone.removeAttribute('transform');
+
+    // убрать интерактивные/экранные элементы
+    clone.querySelectorAll('rect,circle,path').forEach((el) => {
+      const fill = el.getAttribute('fill') || '';
+      if (fill.includes('url(#wifiGradient)') || fill.includes('url(#grid-1m)')) el.remove();
+    });
+
+    const recolor = (el: Element) => {
+      ['fill', 'stroke'].forEach((attr) => {
+        const v = el.getAttribute(attr);
+        if (v && PRINT_COLOR_MAP[v]) el.setAttribute(attr, PRINT_COLOR_MAP[v]);
+      });
+    };
+    if (defs) {
+      const defsClone = defs.cloneNode(true) as SVGDefsElement;
+      recolor(defsClone);
+      defsClone.querySelectorAll('*').forEach(recolor);
+      clone.insertBefore(defsClone, clone.firstChild);
+    }
+    recolor(clone);
+    clone.querySelectorAll('*').forEach(recolor);
+
+    // границы: здание + внешние узлы + запас (печать всегда в исходной ориентации)
+    let minXm = 0;
+    let maxXm = BUILDING.width;
+    let minYm = BUILDING.minY;
+    let maxYm = BUILDING.minY + BUILDING.height;
+    for (const n of nodes) {
+      if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) continue;
+      minXm = Math.min(minXm, n.x);
+      maxXm = Math.max(maxXm, n.x);
+      minYm = Math.min(minYm, n.y);
+      maxYm = Math.max(maxYm, n.y);
+    }
+    const margin = 0.9;
+    const x0 = (minXm - margin) * SCALE;
+    const y0 = (minYm - margin) * SCALE;
+    const vbW = (maxXm - minXm + margin * 2) * SCALE;
+    const vbH = (maxYm - minYm + margin * 2) * SCALE;
+
+    const wrapper = document.createElementNS(NS, 'g');
+    wrapper.appendChild(clone);
+
+    const printSvg = document.createElementNS(NS, 'svg');
+    printSvg.setAttribute('viewBox', `${x0} ${y0} ${vbW} ${vbH}`);
+    printSvg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    printSvg.setAttribute('class', 'print-svg');
+    const bg = document.createElementNS(NS, 'rect');
+    bg.setAttribute('x', String(x0));
+    bg.setAttribute('y', String(y0));
+    bg.setAttribute('width', String(vbW));
+    bg.setAttribute('height', String(vbH));
+    bg.setAttribute('fill', '#FFFFFF');
+    printSvg.appendChild(bg);
+    printSvg.appendChild(wrapper);
+
+    const layerLegend = layers
+      .filter((l: any) => l.visible)
+      .map(
+        (l: any) =>
+          `<span class="pl-item"><i style="background:${PRINT_COLOR_MAP[l.color] || l.color}"></i>${printEsc(l.name)}</span>`
+      )
+      .join('');
+    const cableLegend = cableSummary.list
+      .filter((t: any) => t.count > 0)
+      .map(
+        (t: any) =>
+          `<span class="pl-item"><i class="line" style="background:${PRINT_COLOR_MAP[t.color] || t.color}"></i>${printEsc(
+            t.short
+          )}: ${t.totalMeters} м (${t.count})</span>`
+      )
+      .join('');
+
+    const userLabel = collab.user ? `${printEsc(collab.user.name)} · ${printEsc(collab.user.role === 'admin' ? 'администратор' : 'инженер')}` : 'локальный режим';
+
+    const sheet = document.createElement('div');
+    sheet.id = 'print-sheet';
+    sheet.innerHTML = `
+      <div class="print-head">
+        <div>
+          <div class="print-brand">MKSPEC · КАРТА СЕТИ</div>
+          <h1>${printEsc(projectTitle)}</h1>
+          <div class="print-sub">г. Казань, ул. Алексея Козина, д. 7 · помещения 1080 + 1079 · 1 этаж</div>
+        </div>
+        <div class="print-meta">
+          <div><b>Масштаб 1:100</b> · h = 3.96 м</div>
+          <div>Площадь: ${Math.round(TOTAL_AREA)} м² · стен: ${walls.length}</div>
+          <div>${new Date().toLocaleDateString('ru-RU')} · лист 1 из 1</div>
+          <div>${userLabel}</div>
+        </div>
+      </div>
+      <div class="print-plan"></div>
+      <div class="print-foot">
+        <div class="print-legend">${layerLegend}</div>
+        <div class="print-legend">${cableLegend}</div>
+      </div>
+      <div class="print-note">Схема сети: узлов ${nodes.length}, кабельных трасс ${cables.length}, суммарный метраж ${cableSummary.grandTotalMeters} м. Слой «VPN / шлюз» — логические объекты документации.</div>
+    `;
+    (sheet.querySelector('.print-plan') as HTMLElement).appendChild(printSvg);
+    document.body.appendChild(sheet);
+    document.body.classList.add('printing');
+  };
+
+  const handlePrint = () => {
+    buildPrintSheet();
+    setTimeout(() => window.print(), 80);
+  };
+  printBuildRef.current = buildPrintSheet;
+
   const selectedObject = useMemo(() => {
     if (!Selection?.id) return null;
     if (Selection.type === 'node') return nodes.find((n) => n.id === Selection.id);
@@ -1601,7 +1756,7 @@ export default function App() {
                 <div className="my-1 border-t border-slate-200 dark:border-slate-800" />
                 <button
                   onClick={() => {
-                    window.print();
+                    handlePrint();
                     setShowExportMenu(false);
                   }}
                   className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-blue-50 dark:hover:bg-slate-800 text-left transition"
@@ -2078,6 +2233,7 @@ export default function App() {
 
               {/* Группа трансформации (Панорама + Масштаб + Калибровка) */}
               <g
+                data-plan-root="1"
                 transform={`translate(${pan.x + calibration.offsetX}, ${pan.y + calibration.offsetY}) scale(${
                   zoom * calibration.scaleX
                 }, ${zoom * calibration.scaleY}) rotate(${planRotated ? 180 : 0} ${ROT_CX} ${ROT_CY})`}

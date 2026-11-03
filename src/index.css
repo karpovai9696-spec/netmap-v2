@@ -86,3 +86,75 @@ button:focus-visible {
   pointer-events: none;
   opacity: 0.7;
 }
+
+/* ---------------------------- печать листа ------------------------------- */
+#print-sheet { display: none; }
+
+#print-sheet {
+  color: #111827;
+  font-family: Inter, system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+  background: #fff;
+}
+#print-sheet .print-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  border-bottom: 2px solid #111827;
+  padding-bottom: 6px;
+  margin-bottom: 8px;
+}
+#print-sheet .print-brand {
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: #8E751D;
+  font-weight: 600;
+}
+#print-sheet h1 {
+  font-family: Montserrat, Inter, sans-serif;
+  font-size: 15pt;
+  font-weight: 800;
+  margin: 2px 0 0;
+  line-height: 1.15;
+  color: #111827;
+}
+#print-sheet .print-sub { font-size: 8pt; color: #4B5563; margin-top: 2px; }
+#print-sheet .print-meta { text-align: right; font-size: 7.5pt; color: #374151; line-height: 1.55; white-space: nowrap; }
+#print-sheet .print-plan { text-align: center; }
+#print-sheet .print-svg { height: 136mm; width: auto; max-width: 100%; display: block; margin: 0 auto; }
+#print-sheet { page-break-after: avoid; break-after: avoid; }
+#print-sheet .print-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  border-top: 1px solid #CBD5E1;
+  margin-top: 8px;
+  padding-top: 6px;
+}
+#print-sheet .print-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 7.5pt; color: #374151; }
+#print-sheet .pl-item { display: inline-flex; align-items: center; gap: 4px; }
+#print-sheet .pl-item i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+#print-sheet .pl-item i.line { height: 4px; border-radius: 2px; width: 14px; }
+#print-sheet .print-note { margin-top: 6px; font-size: 7pt; color: #6B7280; }
+
+@media print {
+  html,
+  body {
+    background: #fff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  body.printing > #root { display: none !important; }
+  body.printing #print-sheet { display: block !important; }
+  @page {
+    size: A4 landscape;
+    margin: 8mm;
+  }
+}
