@@ -59,6 +59,10 @@ import {
   WINDOWS as PLAN_WINDOWS,
   BUILDING,
 } from './correctPlan';
+import { useCollab, diffOps } from './collab';
+import type { User, Op, SharedProject } from './collab';
+import { LoginScreen, OnlineBadge, PasswordDialog, ActivityFeed, RemoteCursors } from './Live';
+import type { ActivityItem } from './Live';
 
 // ============================================================================
 // КОНСТАНТЫ МАСШТАБА И ЕДИНОЙ ГЕОМЕТРИИ ЗДАНИЯ (КОЗИНА 7, ПОМ. 1080 + 1079)
@@ -306,6 +310,140 @@ export default function App() {
   const [showDimensions, setShowDimensions] = useState(SAVED?.showDimensions ?? true);
   const [planRotated, setPlanRotated] = useState(SAVED?.planRotated ?? false);
 
+  // ---------------------------------------------------------------------------
+  // СОВМЕСТНАЯ РАБОТА: вход, роли, синхронизация изменений в реальном времени
+  // ---------------------------------------------------------------------------
+  const applyingRemoteRef = useRef(false);
+  const lastSyncedRef = useRef<SharedProject>({
+    nodes: [], cables: [], walls: [], notes: [], projectTitle: '', planRotated: false,
+  });
+  const pendingOpsRef = useRef<Op[]>([]);
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cursorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const collabRef = useRef<any>(null);
+  const [activity, setActivity] = useState<ActivityItem[]>([]);
+  const [showPassword, setShowPassword] = useState(false);
+
+  const pushActivity = (userName: string, color: string, text: string) => {
+    setActivity((prev) => [
+      ...prev.slice(-11),
+      { id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, user: userName, color, text, at: new Date().toISOString() },
+    ]);
+  };
+
+  const describeOps = (ops: Op[]) => {
+    if (!ops.length) return 'обновил проект';
+    const names: Record<string, string> = { node: 'узел', cable: 'кабель', wall: 'стену', note: 'пометку' };
+    const verbs: Record<string, string> = { add: 'добавил', update: 'изменил', delete: 'удалил' };
+    const op = ops[0];
+    let text: string;
+    if (op.kind === 'title.update') text = 'изменил название проекта';
+    else if (op.kind === 'planRotated.update') text = op.value ? 'перевернул план на 180°' : 'вернул план в исходное положение';
+    else {
+      const [ent, act] = op.kind.split('.');
+      text = `${verbs[act] || 'изменил'} ${names[ent] || 'объект'}`;
+    }
+    if (ops.length > 1) text += ` (+${ops.length - 1})`;
+    return text;
+  };
+
+  const applyRemoteOps = (from: User, ops: Op[]) => {
+    applyingRemoteRef.current = true;
+    const cur = lastSyncedRef.current;
+    const clone = (a: any[]) => a.map((x) => ({ ...x }));
+    const nodes = clone(cur.nodes);
+    const cables = clone(cur.cables);
+    const walls = clone(cur.walls);
+    const notes = clone(cur.notes);
+    let title = cur.projectTitle;
+    let rotated = !!cur.planRotated;
+    for (const op of ops) {
+      const [entity, action] = op.kind.split('.');
+      if (entity === 'title') { title = String(op.value || ''); continue; }
+      if (entity === 'planRotated') { rotated = !!op.value; continue; }
+      const list = entity === 'node' ? nodes : entity === 'cable' ? cables : entity === 'wall' ? walls : entity === 'note' ? notes : null;
+      if (!list) continue;
+      if (action === 'add' && op.item) {
+        if (!list.some((x: any) => x.id === op.item.id)) list.push(op.item);
+      } else if (action === 'update' && op.id) {
+        const i = list.findIndex((x: any) => x.id === op.id);
+        if (i >= 0) list[i] = { ...list[i], ...(op.patch || {}), id: op.id };
+      } else if (action === 'delete' && op.id) {
+        const i = list.findIndex((x: any) => x.id === op.id);
+        if (i >= 0) list.splice(i, 1);
+      }
+    }
+    const next: SharedProject = { nodes, cables, walls, notes, projectTitle: title, planRotated: rotated };
+    lastSyncedRef.current = next;
+    setNodes(nodes);
+    setCables(cables);
+    setWalls(walls);
+    setNotes(notes);
+    if (title !== projectTitle) setProjectTitle(title);
+    if (rotated !== planRotated) setPlanRotated(rotated);
+    const color = collab.users.find((u) => u.login === from.login)?.color || '#FCD116';
+    pushActivity(from.name || from.login, color, describeOps(ops));
+    setTimeout(() => { applyingRemoteRef.current = false; }, 0);
+  };
+
+  const loadSharedProject = (proj: SharedProject) => {
+    const next: SharedProject = {
+      nodes: Array.isArray(proj.nodes) ? proj.nodes : [],
+      cables: Array.isArray(proj.cables) ? proj.cables : [],
+      walls: Array.isArray(proj.walls) ? proj.walls : [],
+      notes: Array.isArray(proj.notes) ? proj.notes : [],
+      projectTitle: proj.projectTitle || 'Карта сети — 1 этаж (Козина 7, пом. 1080 + 1079)',
+      planRotated: !!proj.planRotated,
+    };
+    lastSyncedRef.current = { ...next };
+    applyingRemoteRef.current = true;
+    setNodes(next.nodes);
+    setCables(next.cables);
+    setWalls(next.walls);
+    setNotes(next.notes);
+    setProjectTitle(next.projectTitle);
+    setPlanRotated(next.planRotated);
+    setSelection({ type: null, id: null });
+    setActivity([]);
+    setTimeout(() => { applyingRemoteRef.current = false; }, 0);
+  };
+
+  const demoProjectSeed = (): SharedProject => {
+    const [nx, ny] = roomPoint('1080', '12', -1.8, -2.4);
+    return {
+      nodes: DEMO_NODES.map((n) => ({ ...n })),
+      cables: INITIAL_CABLES.map((c) => ({ ...c })),
+      walls: INITIAL_WALLS.map((w) => ({ ...w })),
+      notes: [
+        { id: 'NOTE-1', x: nx, y: ny, text: 'Высота потолка h = 3.96 м (разводка в лотках)', layer: 'notes' },
+        { id: 'NOTE-2', x: 15.63, y: 1.4, text: 'Стык планов 1080 и 1079', layer: 'notes' },
+      ],
+      projectTitle: 'Карта сети — 1 этаж (Козина 7, пом. 1080 + 1079)',
+      planRotated: false,
+    };
+  };
+
+  const collab = useCollab({
+    onInit: (project, me, empty) => {
+      if (empty && me.role === 'admin') {
+        const seed = demoProjectSeed();
+        loadSharedProject(seed);
+        setTimeout(() => collabRef.current?.resetProject(seed), 250);
+      } else {
+        loadSharedProject(project);
+      }
+    },
+    onOps: (from, ops) => applyRemoteOps(from, ops),
+    onReset: (project) => loadSharedProject(project),
+    onToast: (msg) => triggerToast(msg),
+  });
+  collabRef.current = collab;
+
+  const netReadOnly = collab.mode !== 'demo' && collab.user?.role === 'engineer';
+  const canEditNetwork = !netReadOnly;
+
+
+
   // Поповеры в шапке
   const [showCalibrationModal, setShowCalibrationModal] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -334,6 +472,22 @@ export default function App() {
       { id: 'NOTE-2', x: 15.63, y: 1.4, text: 'Стык планов 1080 и 1079', layer: 'notes' },
     ];
   });
+
+  // локальные изменения -> операции для сервера
+  useEffect(() => {
+    const cur: SharedProject = { nodes, cables, walls, notes, projectTitle, planRotated };
+    const prev = lastSyncedRef.current;
+    const ops = diffOps(prev, cur);
+    if (!ops.length) return;
+    lastSyncedRef.current = cur;
+    if (collab.mode !== 'online' || !collab.user || applyingRemoteRef.current) return;
+    pendingOpsRef.current.push(...ops);
+    if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
+    flushTimerRef.current = setTimeout(() => {
+      const batch = pendingOpsRef.current.splice(0);
+      if (batch.length) collab.sendOps(batch);
+    }, 140);
+  }, [nodes, cables, walls, notes, projectTitle, planRotated, collab.mode, collab.user, collab.sendOps]);
 
   // --- История для Undo / Redo ---
   const [history, setHistory] = useState([]);
@@ -387,8 +541,8 @@ export default function App() {
       const key = e.key.toLowerCase();
       if (key === 'v') setActiveTool('select');
       if (key === 'h') setActiveTool('pan');
-      if (key === 'e') setActiveTool('place_node');
-      if (key === 'c') {
+      if (key === 'e' && canEditNetwork) setActiveTool('place_node');
+      if (key === 'c' && canEditNetwork) {
         setActiveTool('cable');
         setCableStartNodeId(null);
       }
@@ -411,7 +565,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [Selection, nodes, cables, walls]);
+  }, [Selection, nodes, cables, walls, canEditNetwork, netReadOnly, collab.user]);
 
   // Перевод экранных координат мыши в метры здания
   const clientToMeters = (clientX, clientY) => {
@@ -612,6 +766,10 @@ export default function App() {
   const handleCanvasMouseMove = (e) => {
     const coords = clientToMeters(e.clientX, e.clientY);
     setMouseMeters(coords);
+    if (collab.mode === 'online' && collab.user) {
+      if (cursorTimerRef.current) clearTimeout(cursorTimerRef.current);
+      cursorTimerRef.current = setTimeout(() => collab.sendCursor(coords.x, coords.y), 60);
+    }
 
     if (isPanning) {
       setPan({ x: e.clientX - panStart.x, y: e.clientY - panStart.y });
@@ -677,6 +835,10 @@ export default function App() {
 
   // Клик или начало перетаскивания узла оборудования
   const handleNodeMouseDown = (e, node) => {
+    if (netReadOnly) {
+      setSelection({ type: 'node', id: node.id });
+      return;
+    }
     e.stopPropagation();
     const layerObj = layers.find((l) => l.id === node.layer);
     if (layerObj?.locked) {
@@ -745,6 +907,10 @@ export default function App() {
 
   // Удаление выбранного элемента
   const handleDeleteSelected = () => {
+    if (netReadOnly && Selection.type !== 'wall' && Selection.type !== 'note') {
+      triggerToast('Нет прав: сеть редактирует администратор');
+      return;
+    }
     if (!Selection?.id) return;
     saveHistory();
     if (Selection.type === 'node') {
@@ -770,6 +936,10 @@ export default function App() {
 
   // Дублирование выбранного узла
   const handleDuplicateNode = (node) => {
+    if (netReadOnly) {
+      triggerToast('Нет прав: сеть редактирует администратор');
+      return;
+    }
     saveHistory();
     const copy = {
       ...node,
@@ -992,6 +1162,28 @@ export default function App() {
     })).filter((g) => g.items.length > 0);
   }, [searchQuery]);
 
+  if (collab.mode === 'loading') {
+    return (
+      <div className="h-screen w-screen bg-cyber-bg text-cyber-text flex flex-col items-center justify-center gap-3">
+        <div className="w-10 h-10 rounded-xl border border-primary/70 bg-primary/10 flex items-center justify-center glow-primary">
+          <span className="font-display font-black text-primary text-xl leading-none">K</span>
+        </div>
+        <div className="font-mono text-xs text-ink-300">Подключение к серверу…</div>
+      </div>
+    );
+  }
+
+  if (collab.mode === 'auth') {
+    return (
+      <LoginScreen
+        onLogin={collab.login}
+        error={collab.error}
+        busy={collab.busy}
+        hint="Пароль можно сменить после входа — клик по своему имени в шапке."
+      />
+    );
+  }
+
   return (
     <div
       className={`h-screen w-screen overflow-hidden flex flex-col select-none font-sans transition-colors duration-200 ${
@@ -1032,9 +1224,21 @@ export default function App() {
                   darkMode ? 'text-slate-100' : 'text-slate-900'
                 }`}
               />
-              <span className="hidden xl:inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                <Check className="w-3 h-3" /> Автосохранено
-              </span>
+              {collab.mode !== 'demo' ? (
+                <OnlineBadge
+                  mode={collab.mode}
+                  user={collab.user}
+                  users={collab.users}
+                  onLogout={() => {
+                    if (window.confirm('Выйти из системы?')) collab.logout();
+                  }}
+                  onChangePassword={() => setShowPassword(true)}
+                />
+              ) : (
+                <span className="hidden xl:inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                  <Check className="w-3 h-3" /> Локальный режим
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-2 text-[11px] text-slate-400 px-1.5">
               <span className="font-mono uppercase tracking-[0.12em] text-[10px]">Масштаб 1:100 · h=3.96 м · площадь {Math.round(TOTAL_AREA)} м² · проверенный план БТИ</span>
@@ -1293,7 +1497,7 @@ export default function App() {
               setWalls(INITIAL_WALLS);
               triggerToast('Демонстрационная схема Козина 7 восстановлена');
             }}
-            className={`hidden lg:flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition ${
+            className={`${netReadOnly ? 'hidden' : 'hidden lg:flex'} items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition ${
               darkMode
                 ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
                 : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
@@ -1372,6 +1576,12 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      {collab.mode === 'offline' && (
+        <div className="z-40 bg-rose-500/15 border-b border-rose-500/30 text-rose-200 text-[11px] px-3 py-1 text-center">
+          Нет связи с сервером — изменения не синхронизируются. Идёт переподключение…
+        </div>
+      )}
 
       {/* =====================================================================
           ОСНОВНАЯ РАБОЧАЯ ОБЛАСТЬ (ЛЕВАЯ ПАНЕЛЬ + ХОЛСТ / ТАБЛИЦА + ПРАВАЯ ПАНЕЛЬ)
@@ -1687,20 +1897,26 @@ export default function App() {
               ].map((t) => {
                 const IconComp = t.icon;
                 const active = activeTool === t.id;
+                const locked = netReadOnly && (t.id === 'place_node' || t.id === 'cable');
                 return (
                   <button
                     key={t.id}
+                    disabled={locked}
                     onClick={() => {
+                      if (locked) {
+                        triggerToast('Роль «инженер»: сеть доступна только для просмотра');
+                        return;
+                      }
                       setActiveTool(t.id);
                       setCableStartNodeId(null);
                       setWallDraft(null);
                     }}
-                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium transition cursor-pointer ${
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
                       active
                         ? 'bg-blue-600 text-white shadow-xs'
                         : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
                     }`}
-                    title={`${t.label} (${t.shortcut})`}
+                    title={locked ? 'Нет прав: сеть редактирует администратор' : `${t.label} (${t.shortcut})`}
                   >
                     <IconComp className="w-3.5 h-3.5" />
                     <span className="hidden xl:inline">{t.label}</span>
@@ -2279,6 +2495,21 @@ export default function App() {
               </g>
             </svg>
 
+            {/* Курсоры коллег в реальном времени */}
+            {collab.mode !== 'demo' && (
+              <RemoteCursors
+                users={collab.users}
+                me={collab.user}
+                pan={pan}
+                zoom={zoom}
+                rotated={planRotated}
+                centerPx={{ x: ROT_CX, y: ROT_CY }}
+              />
+            )}
+
+            {/* Лента совместной работы */}
+            {collab.mode !== 'demo' && <ActivityFeed items={activity} />}
+
             {/* НИЖНИЙ СТАТУС-БАР СЛЕВА (Координаты в метрах, текущий инструмент и подсказки) */}
             <div
               className={`absolute bottom-3 left-3 z-20 px-3 py-1.5 rounded-xl border backdrop-blur-md text-[11px] flex items-center gap-3 shadow-sm ${
@@ -2299,6 +2530,11 @@ export default function App() {
               <span className="hidden md:inline text-slate-400">
                 Колесо — зум • Зажать ЛКМ/Пробел — панорама • Del — удалить
               </span>
+              {netReadOnly && (
+                <span className="hidden lg:inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[10px] font-medium">
+                  Режим инженера: сеть только для просмотра
+                </span>
+              )}
             </div>
 
             {/* НИЖНИЙ ПРАВЫЙ ДОК МАСШТАБА И СЕТКИ */}
@@ -2487,7 +2723,13 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="space-y-2.5 text-xs">
+                  {netReadOnly && (
+                    <div className="mb-2 text-[10px] px-2 py-1 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300">
+                      Роль «инженер»: сеть только для просмотра — редактирование стен и пометок доступно.
+                    </div>
+                  )}
+
+                  <div className={`space-y-2.5 text-xs ${netReadOnly ? 'net-readonly' : ''}`}>
                     <div className="grid grid-cols-3 gap-2">
                       <div className="col-span-1">
                         <label className="text-[10px] font-semibold text-slate-400">Маркировка</label>
@@ -2627,10 +2869,11 @@ export default function App() {
                         setCableStartNodeId(selectedObject.id);
                         triggerToast(`Выберите второй узел для соединения с ${selectedObject.code}`);
                       }}
-                      className="w-full py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold flex items-center justify-center gap-2 shadow-2xs transition cursor-pointer"
+                      disabled={netReadOnly}
+                      className="w-full py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold flex items-center justify-center gap-2 shadow-2xs transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       <Cable className="w-3.5 h-3.5" />
-                      <span>Проложить кабель от этого узла</span>
+                      <span>{netReadOnly ? 'Сеть: только просмотр' : 'Проложить кабель от этого узла'}</span>
                     </button>
                   </div>
                 </div>
@@ -2847,6 +3090,16 @@ export default function App() {
             </div>
           </aside>
         </div>
+      )}
+      {showPassword && (
+        <PasswordDialog
+          onClose={() => setShowPassword(false)}
+          onSave={async (oldPass, newPass) => {
+            await collab.changePassword(oldPass, newPass);
+            setShowPassword(false);
+            collab.logout();
+          }}
+        />
       )}
     </div>
   );

@@ -78,3 +78,11 @@ button:focus-visible {
 
 /* жёлтые CTA: тёмный текст из визитки */
 .bg-blue-600, .hover\:bg-blue-700:hover { color: #09090A !important; }
+
+/* режим «только просмотр» для роли инженера */
+.net-readonly input,
+.net-readonly select,
+.net-readonly textarea {
+  pointer-events: none;
+  opacity: 0.7;
+}

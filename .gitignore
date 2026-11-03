@@ -10,3 +10,8 @@ crop-header.png
 
 # одноразовые патч-скрипты
 tools/patch_*.py
+server/users.json
+server/project.json
+server/*.log
+server/*.pid
+
