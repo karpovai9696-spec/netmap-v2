@@ -30,6 +30,7 @@ echo "--- сервер:"
 mkdir -p "$SRV_DIR"
 cp /tmp/server.mjs /tmp/init-users.mjs "$SRV_DIR"/
 if [ -f /tmp/docs.json ]; then cp /tmp/docs.json "$SRV_DIR/docs.json"; chmod 600 "$SRV_DIR/docs.json"; echo "docs.json установлен (документация по сети)"; fi
+if [ -f /tmp/walls.json ]; then cp /tmp/walls.json "$SRV_DIR/walls.json"; chmod 600 "$SRV_DIR/walls.json"; echo "walls.json установлен (актуальный план)"; fi
 chmod 600 "$SRV_DIR"/*.mjs
 
 if [ ! -f "$SRV_DIR/users.json" ]; then

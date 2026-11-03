@@ -20,6 +20,7 @@ const DATA_DIR = process.env.DATA_DIR || ROOT;
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const PROJECT_FILE = path.join(DATA_DIR, 'project.json');
 const DOCS_FILE = path.join(DATA_DIR, 'docs.json');
+const PLAN_WALLS_FILE = path.join(DATA_DIR, 'walls.json');
 const SESSION_TTL = 7 * 24 * 3600 * 1000;
 const MAX_OPS_PER_SECOND = 60;
 
@@ -94,6 +95,18 @@ function loadDocs() {
   } catch {
     return null;
   }
+}
+
+// актуальные стены плана (обновляются при деплое; заменяют старую модель)
+try {
+  const planWalls = JSON.parse(fs.readFileSync(PLAN_WALLS_FILE, 'utf8'));
+  if (Array.isArray(planWalls) && planWalls.length) {
+    project.walls = planWalls;
+    project.planRotated = false;
+    project.updatedAt = new Date().toISOString();
+  }
+} catch {
+  /* нет файла — оставляем стены из project.json */
 }
 
 let saveTimer = null;
