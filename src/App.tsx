@@ -49,7 +49,8 @@ import {
   X,
   FolderOpen,
   FileText,
-  RotateCw
+  RotateCw,
+  BookOpen
 } from 'lucide-react';
 
 import {
@@ -59,6 +60,8 @@ import {
   WINDOWS as PLAN_WINDOWS,
   BUILDING,
 } from './correctPlan';
+import { OfficeDocs } from './OfficeDocs';
+import { NET_LAYER, NET_CABLE_TYPE, NET_PLAN_NODES, NET_PLAN_CABLES, NET_NOTES } from './officeNet';
 import { useCollab, diffOps } from './collab';
 import type { User, Op, SharedProject } from './collab';
 import { LoginScreen, OnlineBadge, PasswordDialog, ActivityFeed, RemoteCursors } from './Live';
@@ -101,8 +104,8 @@ const inMeters = (v: number, k: number) => Math.round(v * k * 100) / 100;
 const TOTAL_AREA = INITIAL_ROOMS.reduce((s, r) => s + (r.area || 0), 0);
 
 // Центр вращения плана (180°) в координатах холста
-const ROT_CX = (BUILDING.width / 2) * SCALE;
-const ROT_CY = (BUILDING.minY + BUILDING.height / 2) * SCALE;
+const ROT_CX = Math.round((BUILDING.width / 2) * SCALE);
+const ROT_CY = Math.round((BUILDING.minY + BUILDING.height / 2) * SCALE);
 
 // Слои проекта (объединяют управление видимостью, блокировкой и цветовую легенду)
 const INITIAL_LAYERS = [
@@ -114,6 +117,7 @@ const INITIAL_LAYERS = [
   { id: 'power', name: 'Электрика и питание 220В', color: '#EF4444', visible: true, locked: false, lineStyle: 'solid' },
   { id: 'partitions', name: 'Перегородки (редакт.)', color: '#6B6552', visible: true, locked: false, lineStyle: 'solid' },
   { id: 'notes', name: 'Пометки и размеры', color: '#8F8A6E', visible: true, locked: false, lineStyle: 'dotted' },
+  NET_LAYER,
 ];
 
 // Каталог оборудования для левой панели
@@ -154,6 +158,7 @@ const CABLE_TYPES = [
   { id: 'phone_cab', name: 'Телефония / SIP линия', short: 'UTP Cat.5e (Tel)', color: '#34D399', dashed: true, layer: 'telephony', pricePerM: 35 },
   { id: 'cctv_poe', name: 'Видеонаблюдение PoE', short: 'UTP Cat.6 PoE', color: '#FB7185', dashed: true, layer: 'cctv', pricePerM: 52 },
   { id: 'power_220', name: 'Питание 220В (ВВГнг-LS)', short: 'ВВГнг 3х2.5', color: '#EF4444', dashed: false, layer: 'power', pricePerM: 110 },
+  NET_CABLE_TYPE,
 ];
 
 // Стартовая демонстрационная схема сети (повторяет логику со скриншота пользователя, развернутую на оба помещения)
@@ -411,12 +416,13 @@ export default function App() {
   const demoProjectSeed = (): SharedProject => {
     const [nx, ny] = roomPoint('1080', '12', -1.8, -2.4);
     return {
-      nodes: DEMO_NODES.map((n) => ({ ...n })),
-      cables: INITIAL_CABLES.map((c) => ({ ...c })),
+      nodes: [...DEMO_NODES.map((n) => ({ ...n })), ...NET_PLAN_NODES.map((n) => ({ ...n }))],
+      cables: [...INITIAL_CABLES.map((c) => ({ ...c })), ...NET_PLAN_CABLES.map((c) => ({ ...c }))],
       walls: INITIAL_WALLS.map((w) => ({ ...w })),
       notes: [
         { id: 'NOTE-1', x: nx, y: ny, text: 'Высота потолка h = 3.96 м (разводка в лотках)', layer: 'notes' },
         { id: 'NOTE-2', x: 15.63, y: 1.4, text: 'Стык планов 1080 и 1079', layer: 'notes' },
+        ...NET_NOTES.map((n) => ({ ...n })),
       ],
       projectTitle: 'Карта сети — 1 этаж (Козина 7, пом. 1080 + 1079)',
       planRotated: false,
@@ -442,6 +448,30 @@ export default function App() {
   const netReadOnly = collab.mode !== 'demo' && collab.user?.role === 'engineer';
   const canEditNetwork = !netReadOnly;
 
+  // Добавить/обновить объекты из сетевой документации на плане
+  const placeNetObjects = () => {
+    if (netReadOnly) {
+      triggerToast('Нет прав: сеть редактирует администратор');
+      return;
+    }
+    const haveNode = new Set(nodes.map((n: any) => n.id));
+    const haveCable = new Set(cables.map((c: any) => c.id));
+    const haveNote = new Set(notes.map((n: any) => n.id));
+    const addNodes = NET_PLAN_NODES.filter((n) => !haveNode.has(n.id));
+    const addCables = NET_PLAN_CABLES.filter((c) => !haveCable.has(c.id));
+    const addNotes = NET_NOTES.filter((n) => !haveNote.has(n.id));
+    if (!addNodes.length && !addCables.length && !addNotes.length) {
+      triggerToast('Сетевые объекты документации уже размещены на плане');
+      return;
+    }
+    if (addNodes.length) setNodes((prev) => [...prev, ...addNodes.map((n) => ({ ...n }))]);
+    if (addCables.length) setCables((prev) => [...prev, ...addCables.map((c) => ({ ...c }))]);
+    if (addNotes.length) setNotes((prev) => [...prev, ...addNotes.map((n) => ({ ...n }))]);
+    setActiveLayerId('vpn');
+    setTimeout(() => handleFitView(), 250);
+    triggerToast(`На план добавлено: ${addNodes.length} узлов, ${addCables.length} трасс, ${addNotes.length} пометок`);
+  };
+
 
 
   // Поповеры в шапке
@@ -460,9 +490,15 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
 
   // --- Данные проекта ---
-  const [layers, setLayers] = useState(SAVED?.layers ?? INITIAL_LAYERS);
+  const [layers, setLayers] = useState(() => {
+    const saved = Array.isArray(SAVED?.layers) ? SAVED.layers : [];
+    const ids = new Set(saved.map((l: any) => l.id));
+    return [...saved, ...INITIAL_LAYERS.filter((l: any) => !ids.has(l.id))];
+  });
   const [walls, setWalls] = useState(SAVED?.walls ?? INITIAL_WALLS);
   const [nodes, setNodes] = useState(() => SAVED?.nodes ?? DEMO_NODES.map((n) => ({ ...n })));
+  const nodesRef = useRef<any[]>([]);
+  nodesRef.current = nodes;
   const [cables, setCables] = useState(SAVED?.cables ?? INITIAL_CABLES);
   const [notes, setNotes] = useState(() => {
     if (Array.isArray(SAVED?.notes)) return SAVED.notes;
@@ -960,13 +996,26 @@ export default function App() {
     const h = svg?.clientHeight || 700;
     const padX = 90;
     const padY = 110;
-    const zx = (w - padX * 2) / (BUILDING.width * SCALE);
-    const zy = (h - padY * 2) / (BUILDING.height * SCALE);
+    let minX = 0;
+    let maxX = BUILDING.width;
+    let minY = BUILDING.minY;
+    let maxY = BUILDING.minY + BUILDING.height;
+    for (const n of nodesRef.current) {
+      if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) continue;
+      minX = Math.min(minX, n.x);
+      maxX = Math.max(maxX, n.x);
+      minY = Math.min(minY, n.y);
+      maxY = Math.max(maxY, n.y);
+    }
+    const bw = Math.max(1, maxX - minX);
+    const bh = Math.max(1, maxY - minY);
+    const zx = (w - padX * 2) / (bw * SCALE);
+    const zy = (h - padY * 2) / (bh * SCALE);
     const z = Math.max(0.3, Math.min(2.0, Math.min(zx, zy)));
     setZoom(Math.round(z * 100) / 100);
     setPan({
-      x: Math.round((w - BUILDING.width * SCALE * z) / 2),
-      y: Math.round((h - BUILDING.height * SCALE * z) / 2 - BUILDING.minY * SCALE * z),
+      x: Math.round((w - bw * SCALE * z) / 2 - minX * SCALE * z),
+      y: Math.round((h - bh * SCALE * z) / 2 - minY * SCALE * z),
     });
   };
 
@@ -1103,6 +1152,8 @@ export default function App() {
   };
 
   // --- Вычисляемая статистика по проекту и выбранному объекту ---
+  const netPlacedCount = nodes.filter((n: any) => String(n.id).startsWith('NET-')).length;
+
   const layerCounts = useMemo(() => {
     const counts = {};
     layers.forEach((l) => (counts[l.id] = 0));
@@ -1444,6 +1495,18 @@ export default function App() {
             <FileSpreadsheet className="w-3.5 h-3.5" />
             <span>Кабельный журнал ({cables.length})</span>
           </button>
+
+          <button
+            onClick={() => setViewMode('docs')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition ${
+              viewMode === 'docs'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+            }`}
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            <span>Сеть офиса</span>
+          </button>
         </div>
 
         {/* Правая группа: Undo/Redo, Wi-Fi Карта, Тема, Экспорт */}
@@ -1730,6 +1793,8 @@ export default function App() {
             </div>
           </div>
         </div>
+      ) : viewMode === 'docs' ? (
+        <OfficeDocs canPlace={!netReadOnly} onPlace={placeNetObjects} placedCount={netPlacedCount} />
       ) : (
         /* РЕЖИМ 1 И 2: ГЛАВНЫЙ ГРАФИЧЕСКИЙ РЕДАКТОР СХЕМЫ И СТЕН */
         <div className="flex-1 flex min-h-0 relative overflow-hidden">
@@ -1985,6 +2050,8 @@ export default function App() {
             {/* ГЛАВНЫЙ ВЕКТОРНЫЙ ХОЛСТ SVG */}
             <svg
               ref={svgRef}
+              textRendering="geometricPrecision"
+              shapeRendering="geometricPrecision"
               onMouseDown={handleCanvasMouseDown}
               onMouseMove={handleCanvasMouseMove}
               onMouseUp={handleCanvasMouseUp}
@@ -2073,7 +2140,7 @@ export default function App() {
                           x={c[0] * SCALE}
                           y={c[1] * SCALE}
                           textAnchor="middle"
-                          fontSize="10"
+                          fontSize="10.5"
                           fill={darkMode ? '#B9B28F' : '#6B6552'}
                           className="font-medium"
                         >
@@ -2108,14 +2175,14 @@ export default function App() {
                             transform={`translate(${room.label[0] * SCALE}, ${room.label[1] * SCALE})`}
                             className="pointer-events-none"
                           >
-                            <text x="0" y="-5" textAnchor="middle" fontSize="11" fontWeight="700"
+                            <text x="0" y="-5" textAnchor="middle" fontSize="12" fontWeight="700"
                               fill={darkMode ? '#FFF5B8' : '#2E2C1E'}>{room.num}</text>
                             <line x1="-14" y1="-1" x2="14" y2="-1"
                               stroke={darkMode ? '#8E751D' : '#6B6552'} strokeWidth="1.2" />
-                            <text x="0" y="11" textAnchor="middle" fontSize="10.5" fontWeight="600"
+                            <text x="0" y="11" textAnchor="middle" fontSize="11" fontWeight="600"
                               fill={darkMode ? '#B9B28F' : '#6B6552'}>{room.area ?? ''}</text>
                             {room.area !== null && room.area >= 7 && (
-                              <text x="0" y="22" textAnchor="middle" fontSize="8.5"
+                              <text x="0" y="23" textAnchor="middle" fontSize="10.5"
                                 fill={darkMode ? '#8F8A6E' : '#B9B28F'}>{room.name}</text>
                             )}
                           </g>
@@ -2126,7 +2193,7 @@ export default function App() {
 
                   {/* Внешние размерные цепочки — реальные габариты проверенной модели */}
                   {showDimensions && (
-                    <g className="pointer-events-none" fill={darkMode ? '#8F8A6E' : '#6B6552'} fontSize="10">
+                    <g className="pointer-events-none" fill={darkMode ? '#8F8A6E' : '#6B6552'} fontSize="10.5">
                       <line
                         x1={0}
                         y1={(BUILDING.depth + 0.9) * SCALE}
@@ -2202,7 +2269,7 @@ export default function App() {
                             x={((w.x1 + w.x2) / 2) * SCALE}
                             y={((w.y1 + w.y2) / 2) * SCALE - 5}
                             textAnchor="middle"
-                            fontSize="9.5"
+                            fontSize="10.5"
                             fontWeight="700"
                             fill={isSelected ? '#FCD116' : darkMode ? '#FCD116' : '#8E751D'}
                             className="pointer-events-none"
@@ -2325,7 +2392,7 @@ export default function App() {
                             x="0"
                             y="2"
                             textAnchor="middle"
-                            fontSize="9.5"
+                            fontSize="10.5"
                             fontWeight="700"
                             fill="#ffffff"
                           >
@@ -2407,7 +2474,7 @@ export default function App() {
                         <text
                           x="2"
                           y="1"
-                          fontSize="10"
+                          fontSize="10.5"
                           fontWeight="600"
                           fill={darkMode ? '#FCD116' : '#854d0e'}
                         >
@@ -2469,10 +2536,10 @@ export default function App() {
                       {/* Аккуратная подпись кода узла (не перекрывающая чертёж) */}
                       <g transform="translate(0, 22)" className="pointer-events-none">
                         <rect
-                          x="-24"
-                          y="-9"
-                          width="48"
-                          height="13"
+                          x="-27"
+                          y="-10"
+                          width="54"
+                          height="15"
                           rx="4"
                           fill={darkMode ? 'rgba(15,23,42,0.88)' : 'rgba(255,255,255,0.92)'}
                           stroke={isSelected ? '#FCD116' : 'rgba(148,163,184,0.4)'}
@@ -2482,7 +2549,7 @@ export default function App() {
                           x="0"
                           y="0.5"
                           textAnchor="middle"
-                          fontSize="8.5"
+                          fontSize="10.5"
                           fontWeight="700"
                           fill={darkMode ? '#FFF8D6' : '#26251D'}
                         >
