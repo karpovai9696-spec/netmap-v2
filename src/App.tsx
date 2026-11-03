@@ -61,7 +61,7 @@ import {
   BUILDING,
 } from './correctPlan';
 import { OfficeDocs } from './OfficeDocs';
-import { NET_LAYER, NET_CABLE_TYPE, NET_PLAN_NODES, NET_PLAN_CABLES, NET_NOTES } from './officeNet';
+import { NET_LAYER, NET_CABLE_TYPE } from './officeNet';
 import { useCollab, diffOps } from './collab';
 import type { User, Op, SharedProject } from './collab';
 import { LoginScreen, OnlineBadge, PasswordDialog, ActivityFeed, RemoteCursors } from './Live';
@@ -416,13 +416,12 @@ export default function App() {
   const demoProjectSeed = (): SharedProject => {
     const [nx, ny] = roomPoint('1080', '12', -1.8, -2.4);
     return {
-      nodes: [...DEMO_NODES.map((n) => ({ ...n })), ...NET_PLAN_NODES.map((n) => ({ ...n }))],
-      cables: [...INITIAL_CABLES.map((c) => ({ ...c })), ...NET_PLAN_CABLES.map((c) => ({ ...c }))],
+      nodes: DEMO_NODES.map((n) => ({ ...n })),
+      cables: INITIAL_CABLES.map((c) => ({ ...c })),
       walls: INITIAL_WALLS.map((w) => ({ ...w })),
       notes: [
         { id: 'NOTE-1', x: nx, y: ny, text: 'Высота потолка h = 3.96 м (разводка в лотках)', layer: 'notes' },
         { id: 'NOTE-2', x: 15.63, y: 1.4, text: 'Стык планов 1080 и 1079', layer: 'notes' },
-        ...NET_NOTES.map((n) => ({ ...n })),
       ],
       projectTitle: 'Карта сети — 1 этаж (Козина 7, пом. 1080 + 1079)',
       planRotated: false,
@@ -448,29 +447,6 @@ export default function App() {
   const netReadOnly = collab.mode !== 'demo' && collab.user?.role === 'engineer';
   const canEditNetwork = !netReadOnly;
 
-  // Добавить/обновить объекты из сетевой документации на плане
-  const placeNetObjects = () => {
-    if (netReadOnly) {
-      triggerToast('Нет прав: сеть редактирует администратор');
-      return;
-    }
-    const haveNode = new Set(nodes.map((n: any) => n.id));
-    const haveCable = new Set(cables.map((c: any) => c.id));
-    const haveNote = new Set(notes.map((n: any) => n.id));
-    const addNodes = NET_PLAN_NODES.filter((n) => !haveNode.has(n.id));
-    const addCables = NET_PLAN_CABLES.filter((c) => !haveCable.has(c.id));
-    const addNotes = NET_NOTES.filter((n) => !haveNote.has(n.id));
-    if (!addNodes.length && !addCables.length && !addNotes.length) {
-      triggerToast('Сетевые объекты документации уже размещены на плане');
-      return;
-    }
-    if (addNodes.length) setNodes((prev) => [...prev, ...addNodes.map((n) => ({ ...n }))]);
-    if (addCables.length) setCables((prev) => [...prev, ...addCables.map((c) => ({ ...c }))]);
-    if (addNotes.length) setNotes((prev) => [...prev, ...addNotes.map((n) => ({ ...n }))]);
-    setActiveLayerId('vpn');
-    setTimeout(() => handleFitView(), 250);
-    triggerToast(`На план добавлено: ${addNodes.length} узлов, ${addCables.length} трасс, ${addNotes.length} пометок`);
-  };
 
 
 
@@ -1496,17 +1472,19 @@ export default function App() {
             <span>Кабельный журнал ({cables.length})</span>
           </button>
 
-          <button
-            onClick={() => setViewMode('docs')}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition ${
-              viewMode === 'docs'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-            }`}
-          >
-            <BookOpen className="w-3.5 h-3.5" />
-            <span>Сеть офиса</span>
-          </button>
+          {collab.mode !== 'demo' && (
+            <button
+              onClick={() => setViewMode('docs')}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition ${
+                viewMode === 'docs'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>Сеть офиса</span>
+            </button>
+          )}
         </div>
 
         {/* Правая группа: Undo/Redo, Wi-Fi Карта, Тема, Экспорт */}
@@ -1793,8 +1771,8 @@ export default function App() {
             </div>
           </div>
         </div>
-      ) : viewMode === 'docs' ? (
-        <OfficeDocs canPlace={!netReadOnly} onPlace={placeNetObjects} placedCount={netPlacedCount} />
+      ) : viewMode === 'docs' && collab.mode !== 'demo' ? (
+        <OfficeDocs canPlace={!netReadOnly} placedCount={netPlacedCount} />
       ) : (
         /* РЕЖИМ 1 И 2: ГЛАВНЫЙ ГРАФИЧЕСКИЙ РЕДАКТОР СХЕМЫ И СТЕН */
         <div className="flex-1 flex min-h-0 relative overflow-hidden">

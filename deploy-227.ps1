@@ -38,6 +38,13 @@ scp -q (Join-Path $v2 'server\server.mjs') serv-diamedika:/tmp/server.mjs
 if ($LASTEXITCODE -ne 0) { throw 'scp server.mjs failed' }
 scp -q (Join-Path $v2 'server\init-users.mjs') serv-diamedika:/tmp/init-users.mjs
 if ($LASTEXITCODE -ne 0) { throw 'scp init-users.mjs failed' }
+$docs = Join-Path $v2 'server\docs.json'
+if (Test-Path $docs) {
+    scp -q $docs serv-diamedika:/tmp/docs.json
+    if ($LASTEXITCODE -ne 0) { throw 'scp docs.json failed' }
+} else {
+    Write-Warning 'server\docs.json не найден — вкладка «Сеть офиса» будет без данных'
+}
 scp -q (Join-Path $v2 'deploy\netmap-v2-setup.sh') serv-diamedika:/tmp/netmap-v2-setup.sh
 if ($LASTEXITCODE -ne 0) { throw 'scp setup failed' }
 

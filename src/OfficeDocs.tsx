@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Router,
   Server,
@@ -13,7 +13,6 @@ import {
   Cable,
   Lock,
 } from 'lucide-react';
-import { OFFICE_NET } from './officeNet';
 
 function SectionCard({
   title,
@@ -39,13 +38,72 @@ function SectionCard({
 
 export function OfficeDocs({
   canPlace,
-  onPlace,
   placedCount,
 }: {
   canPlace: boolean;
-  onPlace: () => void;
   placedCount: number;
 }) {
+  const [OFFICE_NET, setOfficeNet] = useState<any>(null);
+  const [loadError, setLoadError] = useState('');
+  const [placeError, setPlaceError] = useState('');
+  const [placing, setPlacing] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const token = localStorage.getItem('netmap-v2.auth.v2');
+    fetch('/api/docs', { headers: token ? { Authorization: `Bearer ${token}` } : {}, cache: 'no-store' })
+      .then(async (r) => {
+        const d = await r.json().catch(() => null);
+        if (!r.ok) throw new Error(d?.error || 'Нет доступа к документации');
+        return d;
+      })
+      .then((d) => {
+        if (!cancelled) setOfficeNet(d.documentation || d);
+      })
+      .catch((e) => {
+        if (!cancelled) setLoadError(e.message || 'Не удалось загрузить документацию');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const placeObjects = async () => {
+    setPlaceError('');
+    setPlacing(true);
+    try {
+      const token = localStorage.getItem('netmap-v2.auth.v2');
+      const r = await fetch('/api/net-objects', {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok) throw new Error(d?.error || 'Не удалось разместить объекты');
+    } catch (e: any) {
+      setPlaceError(e.message || 'Ошибка');
+    } finally {
+      setPlacing(false);
+    }
+  };
+
+  if (loadError) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-8">
+        <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-5 py-4 text-xs text-rose-200 max-w-md text-center">
+          {loadError}
+          <div className="text-[10px] text-ink-400 mt-2">Документация доступна только после входа на сервере .227.</div>
+        </div>
+      </div>
+    );
+  }
+  if (!OFFICE_NET) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-8">
+        <div className="font-mono text-xs text-ink-300">Загрузка документации…</div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 overflow-y-auto p-6">
       <div className="max-w-6xl mx-auto space-y-5">
@@ -58,17 +116,18 @@ export function OfficeDocs({
           </div>
           <div className="flex flex-col items-end gap-1.5">
             <button
-              onClick={onPlace}
-              disabled={!canPlace}
+              onClick={placeObjects}
+              disabled={!canPlace || placing}
               title={canPlace ? 'Добавить объекты документации на план' : 'Доступно только администратору'}
               className="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary hover:bg-primary-hover disabled:opacity-40 disabled:cursor-not-allowed text-ink-950 text-xs font-semibold transition"
             >
               <MapPin className="w-4 h-4" />
-              Разместить на плане
+              {placing ? 'Размещаем…' : 'Разместить на плане'}
             </button>
             <span className="text-[10px] text-ink-500">
               {placedCount > 0 ? `на плане: ${placedCount} сетевых объектов` : 'объекты ещё не размещены'}
             </span>
+            {placeError && <span className="text-[10px] text-rose-300 max-w-56 text-right">{placeError}</span>}
           </div>
         </div>
 
@@ -187,7 +246,7 @@ export function OfficeDocs({
           </ul>
           <div className="mt-3 pt-3 border-t border-ink-800 text-[10.5px] text-ink-500 flex items-center gap-2">
             <Cable className="w-3.5 h-3.5" />
-            Источник: <span className="font-mono">Documents\kimi\Workspaces\VPN\OFFICE-GATEWAY.md</span> · данные только для чтения
+            Источник: внутренняя документация «OFFICE-GATEWAY.md» v2.0 · данные только для чтения
           </div>
         </SectionCard>
       </div>

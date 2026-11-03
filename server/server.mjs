@@ -19,6 +19,7 @@ const DIST = process.env.DIST || path.join(ROOT, '..', 'netmap-v2', 'dist');
 const DATA_DIR = process.env.DATA_DIR || ROOT;
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const PROJECT_FILE = path.join(DATA_DIR, 'project.json');
+const DOCS_FILE = path.join(DATA_DIR, 'docs.json');
 const SESSION_TTL = 7 * 24 * 3600 * 1000;
 const MAX_OPS_PER_SECOND = 60;
 
@@ -85,6 +86,14 @@ try {
   if (saved && Array.isArray(saved.nodes) && Array.isArray(saved.walls)) project = saved;
 } catch {
   /* первый запуск */
+}
+
+function loadDocs() {
+  try {
+    return JSON.parse(fs.readFileSync(DOCS_FILE, 'utf8'));
+  } catch {
+    return null;
+  }
 }
 
 let saveTimer = null;
@@ -570,6 +579,47 @@ const server = http.createServer(async (req, res) => {
       // инвалидируем все сессии пользователя
       for (const [tok, s] of sessions) if (s.login.toLowerCase() === user.login.toLowerCase()) sessions.delete(tok);
       return json(res, 200, { ok: true });
+    }
+
+    if (p === '/api/docs' && req.method === 'GET') {
+      const user = sessionUser(req);
+      if (!user) return json(res, 401, { error: 'Требуется вход' });
+      const docs = loadDocs();
+      if (!docs) return json(res, 404, { error: 'Документация не найдена' });
+      return json(res, 200, { documentation: docs.documentation || docs });
+    }
+
+    if (p === '/api/net-objects' && req.method === 'POST') {
+      const user = sessionUser(req);
+      if (!user) return json(res, 401, { error: 'Требуется вход' });
+      if (user.role !== 'admin') return json(res, 403, { error: 'Доступно только администратору' });
+      const docs = loadDocs();
+      if (!docs) return json(res, 404, { error: 'Документация не найдена' });
+
+      const added = { nodes: 0, cables: 0, notes: 0 };
+      const addMissing = (listName, items) => {
+        const list = arr(listName);
+        let n = 0;
+        for (const item of Array.isArray(items) ? items : []) {
+          if (!item || !item.id) continue;
+          if (!list.some((x) => x && x.id === item.id)) {
+            list.push(item);
+            n += 1;
+          }
+        }
+        return n;
+      };
+      added.nodes = addMissing('nodes', docs.planNodes);
+      added.cables = addMissing('cables', docs.planCables);
+      added.notes = addMissing('notes', docs.planNotes);
+
+      const total = added.nodes + added.cables + added.notes;
+      if (total > 0) {
+        project.updatedAt = new Date().toISOString();
+        persistProject();
+        broadcast({ type: 'reset', project, from: publicUser(user) });
+      }
+      return json(res, 200, { ok: true, added, total });
     }
 
     if (p === '/ws') {

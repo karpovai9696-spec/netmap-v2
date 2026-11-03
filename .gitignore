@@ -14,4 +14,6 @@ server/users.json
 server/project.json
 server/*.log
 server/*.pid
+server/docs.json
+screenshot-*.png
 
