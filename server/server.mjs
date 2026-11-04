@@ -21,7 +21,7 @@ const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const PROJECT_FILE = path.join(DATA_DIR, 'project.json');
 const DOCS_FILE = path.join(DATA_DIR, 'docs.json');
 const PLAN_WALLS_FILE = path.join(DATA_DIR, 'walls.json');
-const SESSION_TTL = 7 * 24 * 3600 * 1000;
+const SESSION_TTL = 72 * 3600 * 1000; // 72 часа
 const MAX_OPS_PER_SECOND = 60;
 
 const MIME = {
