@@ -158,3 +158,10 @@ button:focus-visible {
     margin: 8mm;
   }
 }
+
+/* верный чертёж: в тёмной теме инвертируем линии, на печати — чёрные */
+.plan-image { filter: none; }
+.dark .plan-image { filter: invert(1); }
+@media print {
+  #print-sheet .plan-image { filter: none !important; }
+}

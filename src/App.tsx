@@ -61,6 +61,7 @@ import {
   BUILDING,
 } from './correctPlan';
 import { OfficeDocs } from './OfficeDocs';
+import planDrawingUrl from './assets/plan-drawing.svg?url';
 import { NET_LAYER, NET_CABLE_TYPE } from './officeNet';
 import { useCollab, diffOps } from './collab';
 import type { User, Op, SharedProject } from './collab';
@@ -329,7 +330,10 @@ export default function App() {
     SAVED?.projectTitle ?? 'Карта сети — 1 этаж (Козина 7, пом. 1080 + 1079)'
   );
   const [viewMode, setViewMode] = useState('network'); // 'network' | 'walls' | 'bom'
-  const [planFilter, setPlanFilter] = useState(SAVED?.planFilter ?? 'unified'); // 'unified' | '1080' | '1079'
+  const [planFilter, setPlanFilter] = useState(() => {
+    const saved = SAVED?.planFilter;
+    return saved === '1080' || saved === '1079' ? saved : 'drawing';
+  }); // 'unified' | '1080' | '1079'
   const [underlayOpacity, setUnderlayOpacity] = useState(SAVED?.underlayOpacity ?? 95);
   const [showGrid, setShowGrid] = useState(SAVED?.showGrid ?? true);
   const [showWifiHeatmap, setShowWifiHeatmap] = useState(SAVED?.showWifiHeatmap ?? true);
@@ -467,6 +471,10 @@ export default function App() {
   });
   collabRef.current = collab;
 
+  const showDrawingPlan = planFilter === 'drawing';
+  const DRAW_BBOX = { x: 33, y: 223, w: 993, h: 580 };
+  const DRAW_SX = (BUILDING.width * SCALE) / DRAW_BBOX.w;
+  const DRAW_SY = (BUILDING.depth * SCALE) / DRAW_BBOX.h;
   const netReadOnly = collab.mode !== 'demo' && collab.user?.role === 'engineer';
   const canEditNetwork = !netReadOnly;
 
@@ -1454,9 +1462,9 @@ export default function App() {
                   : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
               }`}
             >
-              <option value="unified">План: единый (1080 + 1079)</option>
-              <option value="1080">Только пом. 1080 (164.1 м²)</option>
-              <option value="1079">Только пом. 1079 (217.9 м²)</option>
+              <option value="drawing">Чертёж: актуальный (весь объект)</option>
+              <option value="1080">Модель: только пом. 1080</option>
+              <option value="1079">Модель: только пом. 1079</option>
             </select>
 
             {/* Компактный поповер калибровки и прозрачности подложки (вместо загромождения правой панели!) */}
@@ -2264,8 +2272,25 @@ export default function App() {
                   />
                 )}
 
-                {/* 2. СЛОЙ ПОДЛОЖКИ ЗДАНИЯ (ПОМЕЩЕНИЯ 1080 + 1079, КРЫЛЬЦА, ПАНДУС) */}
-                <g opacity={underlayOpacity / 100}>
+                {/* 2. ПОДЛОЖКА: верный чертёж (SVG) или старая векторная модель */}
+                {showDrawingPlan && (
+                  <image
+                    href={planDrawingUrl}
+                    x={-DRAW_BBOX.x * DRAW_SX}
+                    y={-DRAW_BBOX.y * DRAW_SY}
+                    width={1152 * DRAW_SX}
+                    height={928 * DRAW_SY}
+                    preserveAspectRatio="none"
+                    opacity={underlayOpacity / 100}
+                    className="plan-image"
+                    data-bg="true"
+                  />
+                )}
+
+                <g
+                  opacity={underlayOpacity / 100}
+                  style={showDrawingPlan ? { display: 'none' } : undefined}
+                >
                   {/* Входные крыльца и пандус — контуры из проверенной модели */}
                   {EXTERIOR_ENTRIES.map((ext) => {
                     const parts: any[] = Array.isArray((ext.polygon as any)[0][0]) ? (ext.polygon as any) : [ext.polygon];
@@ -2391,7 +2416,7 @@ export default function App() {
                 </g>
 
                 {/* 2b. ТЕКСТОВЫЙ СЛОЙ — вне групповой прозрачности, чтобы подписи были чёткими */}
-                <g className="pointer-events-none">
+                <g className="pointer-events-none" style={showDrawingPlan ? { display: 'none' } : undefined}>
                   {EXTERIOR_ENTRIES.map((ext) => {
                     const parts: any[] = Array.isArray((ext.polygon as any)[0][0]) ? (ext.polygon as any) : [ext.polygon];
                     const c = parts[0]
