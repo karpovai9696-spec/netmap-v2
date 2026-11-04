@@ -1254,15 +1254,29 @@ export default function App() {
     const wrapper = document.createElementNS(NS, 'g');
     wrapper.appendChild(clone);
 
+    let vx = x0;
+    let vy = y0;
+    let vw = vbW;
+    let vh = vbH;
+    if (planRotated) {
+      const hx = Math.max(ROT_CX - x0, x0 + vbW - ROT_CX);
+      const hy = Math.max(ROT_CY - y0, y0 + vbH - ROT_CY);
+      vx = ROT_CX - hx;
+      vy = ROT_CY - hy;
+      vw = 2 * hx;
+      vh = 2 * hy;
+      wrapper.setAttribute('transform', `rotate(180 ${ROT_CX} ${ROT_CY})`);
+    }
+
     const printSvg = document.createElementNS(NS, 'svg');
-    printSvg.setAttribute('viewBox', `${x0} ${y0} ${vbW} ${vbH}`);
+    printSvg.setAttribute('viewBox', `${vx} ${vy} ${vw} ${vh}`);
     printSvg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
     printSvg.setAttribute('class', 'print-svg');
     const bg = document.createElementNS(NS, 'rect');
-    bg.setAttribute('x', String(x0));
-    bg.setAttribute('y', String(y0));
-    bg.setAttribute('width', String(vbW));
-    bg.setAttribute('height', String(vbH));
+    bg.setAttribute('x', String(vx));
+    bg.setAttribute('y', String(vy));
+    bg.setAttribute('width', String(vw));
+    bg.setAttribute('height', String(vh));
     bg.setAttribute('fill', '#FFFFFF');
     printSvg.appendChild(bg);
     printSvg.appendChild(wrapper);
@@ -2346,6 +2360,7 @@ export default function App() {
                           <text
                             x={((w.x1 + w.x2) / 2) * SCALE}
                             y={((w.y1 + w.y2) / 2) * SCALE - 5}
+                            transform={planRotated ? `rotate(180 ${((w.x1 + w.x2) / 2) * SCALE} ${((w.y1 + w.y2) / 2) * SCALE - 5})` : undefined}
                             textAnchor="middle"
                             fontSize="10.5"
                             fontWeight="700"
@@ -2387,6 +2402,7 @@ export default function App() {
                         key={ext.id}
                         x={c[0] * SCALE}
                         y={c[1] * SCALE}
+                        transform={planRotated ? `rotate(180 ${c[0] * SCALE} ${c[1] * SCALE})` : undefined}
                         textAnchor="middle"
                         fontSize="10.5"
                         fill={darkMode ? '#B9B28F' : '#6B6552'}
@@ -2402,7 +2418,7 @@ export default function App() {
                     INITIAL_ROOMS.filter((r) => planFilter === 'unified' || r.premise === planFilter).map((room) => (
                       <g
                         key={`lbl-${room.id}`}
-                        transform={`translate(${room.label[0] * SCALE}, ${room.label[1] * SCALE}) scale(${1 / zoom})`}
+                        transform={`translate(${room.label[0] * SCALE}, ${room.label[1] * SCALE}) scale(${1 / zoom}) rotate(${planRotated ? 180 : 0})`}
                       >
                         <text x="0" y="-5" textAnchor="middle" fontSize="11" fontWeight="700"
                           fill={darkMode ? '#FFF5B8' : '#2E2C1E'}>{room.num}</text>
@@ -2429,14 +2445,20 @@ export default function App() {
                         strokeWidth="1"
                         strokeDasharray="3,3"
                       />
-                      <text x={(BUILDING.width / 2) * SCALE} y={(BUILDING.depth + 1.35) * SCALE} textAnchor="middle" fontWeight="600">
+                      <text
+                        x={(BUILDING.width / 2) * SCALE}
+                        y={(BUILDING.depth + 1.35) * SCALE}
+                        transform={planRotated ? `rotate(180 ${(BUILDING.width / 2) * SCALE} ${(BUILDING.depth + 1.35) * SCALE})` : undefined}
+                        textAnchor="middle"
+                        fontWeight="600"
+                      >
                         Общая длина здания: {BUILDING.width} м (пом. 1080 + пом. 1079)
                       </text>
                       <text
                         x={-0.7 * SCALE}
                         y={(BUILDING.depth / 2) * SCALE}
                         textAnchor="middle"
-                        transform={`rotate(-90, ${-0.7 * SCALE}, ${(BUILDING.depth / 2) * SCALE})`}
+                        transform={`${planRotated ? `rotate(180, ${-0.7 * SCALE}, ${(BUILDING.depth / 2) * SCALE}) ` : ''}rotate(-90, ${-0.7 * SCALE}, ${(BUILDING.depth / 2) * SCALE})`}
                         fontWeight="600"
                       >
                         Глубина: {BUILDING.depth} м
@@ -2526,7 +2548,7 @@ export default function App() {
                       />
                       {/* Метка длины на выбранном кабеле */}
                       {isSelected && (
-                        <g transform={`translate(${midPoint.x}, ${midPoint.y})`}>
+                        <g transform={`translate(${midPoint.x}, ${midPoint.y}) rotate(${planRotated ? 180 : 0})`}>
                           <rect
                             x="-28"
                             y="-10"
@@ -2583,7 +2605,7 @@ export default function App() {
                     <g
                       transform={`translate(${((rulerPoints.x1 + rulerPoints.x2) / 2) * SCALE}, ${
                         ((rulerPoints.y1 + rulerPoints.y2) / 2) * SCALE - 10
-                      })`}
+                      }) rotate(${planRotated ? 180 : 0})`}
                     >
                       <rect x="-36" y="-12" width="72" height="20" rx="6" fill="#f59e0b" />
                       <text x="0" y="2" textAnchor="middle" fontSize="10.5" fontWeight="700" fill="#fff">
@@ -2602,7 +2624,7 @@ export default function App() {
                     return (
                       <g
                         key={nt.id}
-                        transform={`translate(${nt.x * SCALE}, ${nt.y * SCALE})`}
+                        transform={`translate(${nt.x * SCALE}, ${nt.y * SCALE}) rotate(${planRotated ? 180 : 0})`}
                         onMouseDown={(e) => {
                           e.stopPropagation();
                           setSelection({ type: 'note', id: nt.id });
@@ -2683,7 +2705,7 @@ export default function App() {
                       </foreignObject>
 
                       {/* Аккуратная подпись кода узла (не перекрывающая чертёж) */}
-                      <g transform={`translate(0, 22) scale(${1 / zoom})`} className="pointer-events-none">
+                      <g transform={`translate(0, 22) scale(${1 / zoom}) rotate(${planRotated ? 180 : 0})`} className="pointer-events-none">
                         <rect
                           x="-25"
                           y="-9"
