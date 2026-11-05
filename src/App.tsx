@@ -50,7 +50,10 @@ import {
   FolderOpen,
   FileText,
   RotateCw,
-  BookOpen
+  BookOpen,
+  DoorOpen,
+  AppWindow,
+  SquareDashed
 } from 'lucide-react';
 
 import {
@@ -346,7 +349,7 @@ export default function App() {
   // ---------------------------------------------------------------------------
   const applyingRemoteRef = useRef(false);
   const lastSyncedRef = useRef<SharedProject>({
-    nodes: [], cables: [], walls: [], notes: [], projectTitle: '', planRotated: false,
+    nodes: [], cables: [], walls: [], notes: [], openings: [], projectTitle: '', planRotated: false,
   });
   const pendingOpsRef = useRef<Op[]>([]);
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -387,13 +390,25 @@ export default function App() {
     const cables = clone(cur.cables);
     const walls = clone(cur.walls);
     const notes = clone(cur.notes);
+    const openings = clone(cur.openings || []);
     let title = cur.projectTitle;
     let rotated = !!cur.planRotated;
     for (const op of ops) {
       const [entity, action] = op.kind.split('.');
       if (entity === 'title') { title = String(op.value || ''); continue; }
       if (entity === 'planRotated') { rotated = !!op.value; continue; }
-      const list = entity === 'node' ? nodes : entity === 'cable' ? cables : entity === 'wall' ? walls : entity === 'note' ? notes : null;
+      const list =
+        entity === 'node'
+          ? nodes
+          : entity === 'cable'
+          ? cables
+          : entity === 'wall'
+          ? walls
+          : entity === 'note'
+          ? notes
+          : entity === 'opening'
+          ? openings
+          : null;
       if (!list) continue;
       if (action === 'add' && op.item) {
         if (!list.some((x: any) => x.id === op.item.id)) list.push(op.item);
@@ -405,12 +420,13 @@ export default function App() {
         if (i >= 0) list.splice(i, 1);
       }
     }
-    const next: SharedProject = { nodes, cables, walls, notes, projectTitle: title, planRotated: rotated };
+    const next: SharedProject = { nodes, cables, walls, notes, openings, projectTitle: title, planRotated: rotated };
     lastSyncedRef.current = next;
     setNodes(nodes);
     setCables(cables);
     setWalls(walls);
     setNotes(notes);
+    setOpenings(openings);
     if (title !== projectTitle) setProjectTitle(title);
     if (rotated !== planRotated) setPlanRotated(rotated);
     const color = collab.users.find((u) => u.login === from.login)?.color || '#FCD116';
@@ -424,6 +440,9 @@ export default function App() {
       cables: Array.isArray(proj.cables) ? proj.cables : [],
       walls: Array.isArray(proj.walls) ? proj.walls : [],
       notes: Array.isArray(proj.notes) ? proj.notes : [],
+      openings: (Array.isArray(proj.openings) ? proj.openings : []).filter((o: any) =>
+        (Array.isArray(proj.walls) ? proj.walls : []).some((w: any) => w.id === o.wallId)
+      ),
       projectTitle: proj.projectTitle || 'Карта сети — 1 этаж (Козина 7, пом. 1080 + 1079)',
       planRotated: !!proj.planRotated,
     };
@@ -433,6 +452,7 @@ export default function App() {
     setCables(next.cables);
     setWalls(next.walls);
     setNotes(next.notes);
+    setOpenings(next.openings || []);
     setProjectTitle(next.projectTitle);
     setPlanRotated(next.planRotated);
     setSelection({ type: null, id: null });
@@ -446,6 +466,7 @@ export default function App() {
       nodes: DEMO_NODES.map((n) => ({ ...n })),
       cables: INITIAL_CABLES.map((c) => ({ ...c })),
       walls: INITIAL_WALLS.map((w) => ({ ...w })),
+      openings: [],
       notes: [
         { id: 'NOTE-1', x: nx, y: ny, text: 'Высота потолка h = 3.96 м (разводка в лотках)', layer: 'notes' },
         { id: 'NOTE-2', x: 15.63, y: 1.4, text: 'Стык планов 1080 и 1079', layer: 'notes' },
@@ -476,6 +497,13 @@ export default function App() {
   const DRAW_SX = (BUILDING.width * SCALE) / DRAW_BBOX.w;
   const DRAW_SY = (BUILDING.depth * SCALE) / DRAW_BBOX.h;
   const netReadOnly = collab.mode !== 'demo' && collab.user?.role === 'engineer';
+  useEffect(() => {
+    if (netReadOnly) {
+      setActiveTool('wall');
+      setActiveLayerId('partitions');
+      triggerToast('Роль инженера: доступны стены, двери, окна, проёмы и пометки');
+    }
+  }, [netReadOnly]);
   const canEditNetwork = !netReadOnly;
 
 
@@ -503,6 +531,7 @@ export default function App() {
     return [...saved, ...INITIAL_LAYERS.filter((l: any) => !ids.has(l.id))];
   });
   const [walls, setWalls] = useState(SAVED?.walls ?? INITIAL_WALLS);
+  const [openings, setOpenings] = useState<any[]>(SAVED?.openings ?? []);
   const [nodes, setNodes] = useState(() => SAVED?.nodes ?? DEMO_NODES.map((n) => ({ ...n })));
   const nodesRef = useRef<any[]>([]);
   nodesRef.current = nodes;
@@ -530,7 +559,7 @@ export default function App() {
 
   // локальные изменения -> операции для сервера
   useEffect(() => {
-    const cur: SharedProject = { nodes, cables, walls, notes, projectTitle, planRotated };
+    const cur: SharedProject = { nodes, cables, walls, notes, openings, projectTitle, planRotated };
     const prev = lastSyncedRef.current;
     const ops = diffOps(prev, cur);
     if (!ops.length) return;
@@ -542,7 +571,7 @@ export default function App() {
       const batch = pendingOpsRef.current.splice(0);
       if (batch.length) collab.sendOps(batch);
     }, 140);
-  }, [nodes, cables, walls, notes, projectTitle, planRotated, collab.mode, collab.user, collab.sendOps]);
+  }, [nodes, cables, walls, notes, openings, projectTitle, planRotated, collab.mode, collab.user, collab.sendOps]);
 
   // --- История для Undo / Redo ---
   const [history, setHistory] = useState([]);
@@ -575,6 +604,7 @@ export default function App() {
         nodes: JSON.parse(JSON.stringify(nodes)),
         cables: JSON.parse(JSON.stringify(cables)),
         walls: JSON.parse(JSON.stringify(walls)),
+        openings: JSON.parse(JSON.stringify(openings)),
       }
     ]);
   };
@@ -585,6 +615,7 @@ export default function App() {
     setNodes(last.nodes);
     setCables(last.cables);
     setWalls(last.walls);
+    setOpenings(last.openings || []);
     setHistory((prev) => prev.slice(0, -1));
     triggerToast('Действие отменено (Undo)');
   };
@@ -602,6 +633,9 @@ export default function App() {
         setCableStartNodeId(null);
       }
       if (key === 'w') setActiveTool('wall');
+      if (key === 'd') setActiveTool('door');
+      if (key === 'o') setActiveTool('window');
+      if (key === 'p') setActiveTool('opening');
       if (key === 'm') {
         setActiveTool('ruler');
         setRulerPoints(null);
@@ -710,7 +744,7 @@ export default function App() {
   useEffect(() => {
     (window as any).__netmapV2 = {
       counts: () => ({ nodes: nodes.length, cables: cables.length, walls: walls.length, layers: layers.length }),
-      state: () => ({ nodes, cables, walls, layers, notes, projectTitle, darkMode, zoom, pan }),
+      state: () => ({ nodes, cables, walls, layers, notes, openings, projectTitle, darkMode, zoom, pan, selection: Selection, activeTool }),
       screenOf: (x: number, y: number) => {
         const r = svgRef.current?.getBoundingClientRect();
         if (!r) return { x: 0, y: 0 };
@@ -723,7 +757,61 @@ export default function App() {
         return { x: r.left + pan.x + px * zoom, y: r.top + pan.y + py * zoom };
       },
     };
-  }, [nodes, cables, walls, layers, notes, projectTitle, darkMode, zoom, pan, planRotated]);
+  }, [nodes, cables, walls, layers, notes, openings, projectTitle, darkMode, zoom, pan, planRotated, Selection, activeTool]);
+
+  // --- Проёмы: двери, окна, технологические проёмы ---
+  const OPENING_DEFAULTS: Record<string, { width: number; height: number }> = {
+    door: { width: 0.9, height: 2.1 },
+    window: { width: 1.4, height: 1.5 },
+    opening: { width: 1.1, height: 2.1 },
+  };
+  const wallLen = (w: any) => Math.max(0.001, Math.hypot(w.x2 - w.x1, w.y2 - w.y1));
+  const pointOnWall = (w: any, t: number): [number, number] => {
+    const L = wallLen(w);
+    return [w.x1 + ((w.x2 - w.x1) * t) / L, w.y1 + ((w.y2 - w.y1) * t) / L];
+  };
+  const visibleWalls = () => walls.filter((w: any) => !showDrawingPlan || w.custom);
+  const wallAtPoint = (x: number, y: number) => {
+    let best: any = null;
+    for (const w of visibleWalls()) {
+      const dx = w.x2 - w.x1;
+      const dy = w.y2 - w.y1;
+      const L2 = dx * dx + dy * dy || 1e-9;
+      let t = ((x - w.x1) * dx + (y - w.y1) * dy) / L2;
+      t = Math.max(0, Math.min(1, t));
+      const px = w.x1 + dx * t;
+      const py = w.y1 + dy * t;
+      const d = Math.hypot(x - px, y - py);
+      if (d <= 0.45 && (!best || d < best.d)) best = { wall: w, t: t * Math.sqrt(L2), d };
+    }
+    return best;
+  };
+  const createOpening = (wall: any, type: 'door' | 'window' | 'opening', centerT: number) => {
+    const L = wallLen(wall);
+    const def = OPENING_DEFAULTS[type];
+    const width = Math.min(def.width, Math.max(0.4, L - 0.2));
+    const start = Math.max(0, Math.min(L - width, centerT - width / 2));
+    const clash = openings.some(
+      (o: any) => o.wallId === wall.id && start < o.offset + o.width && o.offset < start + width
+    );
+    if (clash) {
+      triggerToast('В этом месте уже есть проём');
+      return;
+    }
+    saveHistory();
+    const id = `OP-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+    const op = {
+      id,
+      wallId: wall.id,
+      type,
+      offset: Math.round(start * 100) / 100,
+      width: Math.round(width * 100) / 100,
+      height: def.height,
+    };
+    setOpenings((prev) => [...prev, op]);
+    setSelection({ type: 'opening', id });
+    triggerToast(type === 'door' ? 'Добавлена дверь' : type === 'window' ? 'Добавлено окно' : 'Добавлен проём');
+  };
 
   // --- Обработчики мыши на холсте ---
   const handleCanvasMouseDown = (e) => {
@@ -734,6 +822,17 @@ export default function App() {
     }
 
     const coords = clientToMeters(e.clientX, e.clientY);
+
+    // Установка проёма (дверь / окно / технологический проём)
+    if (activeTool === 'door' || activeTool === 'window' || activeTool === 'opening') {
+      const hit = wallAtPoint(coords.x, coords.y);
+      if (!hit) {
+        triggerToast('Кликните по стене, чтобы поставить проём');
+        return;
+      }
+      createOpening(hit.wall, activeTool, hit.t);
+      return;
+    }
 
     // Размещение нового оборудования
     if (activeTool === 'place_node' && pendingEquipment) {
@@ -785,6 +884,7 @@ export default function App() {
           y2: coords.y,
           thickness: 0.12,
           loadBearing: false,
+          custom: true,
           name: 'Новая перегородка ГКЛ'
         };
         setWalls((prev) => [...prev, newWall]);
@@ -936,6 +1036,17 @@ export default function App() {
   // Клик или перетаскивание стены/перегородки
   const handleWallMouseDown = (e, wall) => {
     e.stopPropagation();
+    // в режиме проёма клик по стене должен ставить дверь/окно/проём
+    if (activeTool === 'door' || activeTool === 'window' || activeTool === 'opening') {
+      const coords = clientToMeters(e.clientX, e.clientY);
+      const dx = wall.x2 - wall.x1;
+      const dy = wall.y2 - wall.y1;
+      const L2 = dx * dx + dy * dy || 1e-9;
+      let t = ((coords.x - wall.x1) * dx + (coords.y - wall.y1) * dy) / L2;
+      t = Math.max(0, Math.min(1, t));
+      createOpening(wall, activeTool, t * Math.sqrt(L2));
+      return;
+    }
     setSelection({ type: 'wall', id: wall.id });
 
     if (wall.loadBearing) {
@@ -962,7 +1073,7 @@ export default function App() {
 
   // Удаление выбранного элемента
   const handleDeleteSelected = () => {
-    if (netReadOnly && Selection.type !== 'wall' && Selection.type !== 'note') {
+    if (netReadOnly && Selection.type !== 'wall' && Selection.type !== 'note' && Selection.type !== 'opening') {
       triggerToast('Нет прав: сеть редактирует администратор');
       return;
     }
@@ -982,7 +1093,11 @@ export default function App() {
         return;
       }
       setWalls((prev) => prev.filter((w) => w.id !== Selection.id));
+      setOpenings((prev) => prev.filter((o: any) => o.wallId !== Selection.id));
       triggerToast('Перегородка демонтирована');
+    } else if (Selection.type === 'opening') {
+      setOpenings((prev) => prev.filter((o: any) => o.id !== Selection.id));
+      triggerToast('Проём удалён');
     } else if (Selection.type === 'note') {
       setNotes((prev) => prev.filter((n) => n.id !== Selection.id));
     }
@@ -1053,7 +1168,7 @@ export default function App() {
         localStorage.setItem(
           STORAGE_KEY,
           JSON.stringify({
-            projectTitle, nodes, cables, walls, layers, notes, activeLayerId,
+            projectTitle, nodes, cables, walls, layers, notes, openings, activeLayerId,
             darkMode, planFilter, underlayOpacity, calibration,
             showGrid, showRoomLabels, showDimensions, showWifiHeatmap,
             zoom, pan, planRotated,
@@ -1066,7 +1181,7 @@ export default function App() {
     }, 350);
     return () => clearTimeout(t);
   }, [
-    projectTitle, nodes, cables, walls, layers, notes, activeLayerId,
+    projectTitle, nodes, cables, walls, layers, notes, openings, activeLayerId,
     darkMode, planFilter, underlayOpacity, calibration,
     showGrid, showRoomLabels, showDimensions, showWifiHeatmap, zoom, pan, planRotated,
   ]);
@@ -1121,7 +1236,7 @@ export default function App() {
   const handleExportJSON = () => {
     const payload = {
       version: 2,
-      projectTitle, nodes, cables, walls, layers, notes, activeLayerId,
+      projectTitle, nodes, cables, walls, layers, notes, openings, activeLayerId,
       darkMode, planFilter, underlayOpacity, calibration,
       showGrid, showRoomLabels, showDimensions, showWifiHeatmap, zoom, pan, planRotated,
       exportedAt: new Date().toISOString(),
@@ -1153,6 +1268,7 @@ export default function App() {
         if (Array.isArray(data.walls)) setWalls(data.walls);
         if (Array.isArray(data.layers)) setLayers(data.layers);
         if (Array.isArray(data.notes)) setNotes(data.notes);
+        if (Array.isArray(data.openings)) setOpenings(data.openings);
         if (data.activeLayerId) setActiveLayerId(data.activeLayerId);
         if (typeof data.darkMode === 'boolean') setDarkMode(data.darkMode);
         if (data.planFilter) setPlanFilter(data.planFilter);
@@ -1347,9 +1463,10 @@ export default function App() {
     if (Selection.type === 'node') return nodes.find((n) => n.id === Selection.id);
     if (Selection.type === 'cable') return cables.find((c) => c.id === Selection.id);
     if (Selection.type === 'wall') return walls.find((w) => w.id === Selection.id);
+    if (Selection.type === 'opening') return openings.find((o: any) => o.id === Selection.id);
     if (Selection.type === 'note') return notes.find((n) => n.id === Selection.id);
     return null;
-  }, [Selection, nodes, cables, walls, notes]);
+  }, [Selection, nodes, cables, walls, notes, openings]);
 
   // Фильтрация каталога оборудования по поиску
   const filteredCatalog = useMemo(() => {
@@ -1619,7 +1736,7 @@ export default function App() {
             }`}
           >
             <Network className="w-3.5 h-3.5" />
-            <span>Схема СКС</span>
+            <span>{netReadOnly ? 'План' : 'Схема СКС'}</span>
           </button>
 
           <button
@@ -1637,6 +1754,7 @@ export default function App() {
             <span>Редактор стен</span>
           </button>
 
+          {!netReadOnly && (
           <button
             onClick={() => setViewMode('bom')}
             className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition ${
@@ -1648,8 +1766,9 @@ export default function App() {
             <FileSpreadsheet className="w-3.5 h-3.5" />
             <span>Кабельный журнал ({cables.length})</span>
           </button>
+          )}
 
-          {collab.mode !== 'demo' && (
+          {collab.mode !== 'demo' && !netReadOnly && (
             <button
               onClick={() => setViewMode('docs')}
               className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition ${
@@ -1683,7 +1802,7 @@ export default function App() {
 
           <button
             onClick={() => setShowWifiHeatmap(!showWifiHeatmap)}
-            className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition ${
+            className={`${netReadOnly ? 'hidden' : 'hidden sm:flex'} items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition ${
               showWifiHeatmap
                 ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
                 : darkMode
@@ -1755,6 +1874,7 @@ export default function App() {
                     <div className="text-[10px] text-slate-400">Восстановить сохранённую схему</div>
                   </div>
                 </button>
+                {!netReadOnly && (
                 <button
                   onClick={handleExportCSV}
                   className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-blue-50 dark:hover:bg-slate-800 text-left transition"
@@ -1765,6 +1885,7 @@ export default function App() {
                     <div className="text-[10px] text-slate-400">Таблица узлов, трасс и метража</div>
                   </div>
                 </button>
+                )}
                 <button
                   onClick={handleExportJSON}
                   className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-blue-50 dark:hover:bg-slate-800 text-left transition"
@@ -1961,8 +2082,8 @@ export default function App() {
               darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200/90'
             }`}
           >
-            {/* Поиск по оборудованию */}
-            <div className="p-2.5 border-b border-slate-200/80 dark:border-slate-800">
+            {/* Поиск по оборудованию (только для администратора) */}
+            <div className={`p-2.5 border-b border-slate-200/80 dark:border-slate-800 ${netReadOnly ? 'hidden' : ''}`}>
               <div
                 className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-xs ${
                   darkMode ? 'bg-slate-950 border-slate-800 text-slate-200' : 'bg-slate-50 border-slate-200/90 text-slate-700'
@@ -1987,7 +2108,7 @@ export default function App() {
             {/* Прокручиваемый каталог компонентов */}
             <div className="flex-1 overflow-y-auto p-2.5 space-y-4">
               {/* Секции оборудования (2 колонки, компактные карточки) */}
-              {filteredCatalog.map((section) => (
+              {!netReadOnly && filteredCatalog.map((section) => (
                 <div key={section.group}>
                   <div className="px-1 mb-1.5 flex items-center justify-between">
                     <span className="text-[10px] font-bold tracking-wider uppercase text-slate-400">
@@ -2038,7 +2159,46 @@ export default function App() {
                 </div>
               ))}
 
-              {/* Секция выбора типа кабеля для прокладки */}
+              {netReadOnly && (
+                <div className="space-y-3">
+                  <div className="px-1">
+                    <div className="text-[10px] font-bold tracking-wider uppercase text-slate-400">Инженер: стены и проёмы</div>
+                    <div className="text-[10px] text-slate-500 mt-1 leading-snug">
+                      Чертите перегородки, ставьте двери, окна и проёмы. Сеть и оборудование доступны только администратору.
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {[
+                      { id: 'select', label: 'Выбор', icon: MousePointer },
+                      { id: 'wall', label: 'Перегородка', icon: BrickWall },
+                      { id: 'door', label: 'Дверь', icon: DoorOpen },
+                      { id: 'window', label: 'Окно', icon: AppWindow },
+                      { id: 'opening', label: 'Проём', icon: SquareDashed },
+                      { id: 'ruler', label: 'Линейка', icon: Ruler },
+                      { id: 'note', label: 'Текст', icon: Type },
+                    ].map((t: any) => {
+                      const I = t.icon;
+                      const act = activeTool === t.id;
+                      return (
+                        <button
+                          key={t.id}
+                          onClick={() => { setActiveTool(t.id); setWallDraft(null); }}
+                          className={`flex items-center gap-1.5 px-2 py-1.5 rounded-xl border text-[11px] transition ${act ? 'bg-blue-600 text-white border-blue-600' : darkMode ? 'bg-slate-800/60 border-slate-800 hover:bg-slate-800' : 'bg-slate-50 border-slate-200 hover:bg-white'}`}
+                        >
+                          <I className="w-3.5 h-3.5" />
+                          <span>{t.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className={`p-3 rounded-xl border text-[11px] leading-relaxed ${darkMode ? 'bg-slate-950/70 border-slate-800 text-slate-400' : 'bg-blue-50/60 border-blue-100 text-slate-600'}`}>
+                    <b>Как работать:</b> выберите инструмент → кликните на плане. Дверь/окно/проём ставятся кликом по стене. Перегородку выделяйте и тяните мышью, Del — удалить.
+                  </div>
+                </div>
+              )}
+
+              {/* Секция выбора типа кабеля для прокладки (только админ) */}
+              {!netReadOnly && (
               <div>
                 <div className="px-1 mb-1.5 flex items-center justify-between">
                   <span className="text-[10px] font-bold tracking-wider uppercase text-slate-400">
@@ -2082,6 +2242,7 @@ export default function App() {
                   })}
                 </div>
               </div>
+              )}
 
               {/* Быстрая памятка по работе со стенами */}
               <div
@@ -2112,9 +2273,14 @@ export default function App() {
                 { id: 'place_node', label: 'Узел', shortcut: 'E', icon: Cpu },
                 { id: 'cable', label: 'Кабель', shortcut: 'C', icon: Cable },
                 { id: 'wall', label: 'Перегородка', shortcut: 'W', icon: BrickWall },
+                { id: 'door', label: 'Дверь', shortcut: 'D', icon: DoorOpen },
+                { id: 'window', label: 'Окно', shortcut: 'O', icon: AppWindow },
+                { id: 'opening', label: 'Проём', shortcut: 'P', icon: SquareDashed },
                 { id: 'ruler', label: 'Линейка', shortcut: 'M', icon: Ruler },
                 { id: 'note', label: 'Текст', shortcut: 'T', icon: Type },
-              ].map((t) => {
+              ]
+                .filter((t) => !netReadOnly || (t.id !== 'place_node' && t.id !== 'cable'))
+                .map((t) => {
                 const IconComp = t.icon;
                 const active = activeTool === t.id;
                 const locked = netReadOnly && (t.id === 'place_node' || t.id === 'cable');
@@ -2287,12 +2453,9 @@ export default function App() {
                   />
                 )}
 
-                <g
-                  opacity={underlayOpacity / 100}
-                  style={showDrawingPlan ? { display: 'none' } : undefined}
-                >
+                <g opacity={underlayOpacity / 100}>
                   {/* Входные крыльца и пандус — контуры из проверенной модели */}
-                  {EXTERIOR_ENTRIES.map((ext) => {
+                  {!showDrawingPlan && EXTERIOR_ENTRIES.map((ext) => {
                     const parts: any[] = Array.isArray((ext.polygon as any)[0][0]) ? (ext.polygon as any) : [ext.polygon];
                     const c = parts[0]
                       .reduce((a: number[], p: number[]) => [a[0] + p[0], a[1] + p[1]], [0, 0])
@@ -2314,7 +2477,7 @@ export default function App() {
                   })}
 
                   {/* Контуры и заливка помещений — полигоны проверенной модели */}
-                  {INITIAL_ROOMS.filter((r) => planFilter === 'unified' || r.premise === planFilter).map((room) => {
+                  {!showDrawingPlan && INITIAL_ROOMS.filter((r) => planFilter === 'unified' || r.premise === planFilter).map((room) => {
                     const is1080 = room.premise === '1080';
                     const fillLight = is1080 ? '#FFFDF0' : '#FFF8D6';
                     const fillDark = is1080 ? '#101012' : '#17171A';
@@ -2338,6 +2501,7 @@ export default function App() {
                   {/* СТЕНА И ПЕРЕГОРОДКИ (НЕСУЩИЕ + РЕДАКТИРУЕМЫЕ) */}
                   {walls.map((w) => {
                     const isSelected = Selection?.type === 'wall' && Selection?.id === w.id;
+                    if (showDrawingPlan && !w.custom) return null;
                     const partLayer = layers.find((l) => l.id === 'partitions');
                     if (!w.loadBearing && !partLayer?.visible) return null;
 
@@ -2354,6 +2518,19 @@ export default function App() {
                       : '#8F8A6E';
 
                     const lengthM = Math.round(Math.hypot(w.x2 - w.x1, w.y2 - w.y1) * 100) / 100;
+                    const L = Math.max(0.001, Math.hypot(w.x2 - w.x1, w.y2 - w.y1));
+                    const wallOpenings = openings
+                      .filter((o: any) => o.wallId === w.id)
+                      .sort((a: any, b: any) => a.offset - b.offset);
+                    const wallSegs: [number, number][] = [];
+                    let cursor = 0;
+                    for (const o of wallOpenings) {
+                      const a = Math.max(0, o.offset);
+                      const b = Math.min(L, o.offset + o.width);
+                      if (a > cursor) wallSegs.push([cursor, a]);
+                      cursor = Math.max(cursor, b);
+                    }
+                    if (cursor < L) wallSegs.push([cursor, L]);
 
                     return (
                       <g
@@ -2370,16 +2547,72 @@ export default function App() {
                           stroke="transparent"
                           strokeWidth={Math.max(14, w.thickness * SCALE + 8)}
                         />
-                        {/* Видимая стена */}
-                        <line
-                          x1={w.x1 * SCALE}
-                          y1={w.y1 * SCALE}
-                          x2={w.x2 * SCALE}
-                          y2={w.y2 * SCALE}
-                          stroke={strokeColor}
-                          strokeWidth={Math.max(3, w.thickness * SCALE)}
-                          strokeLinecap="square"
-                        />
+                        {/* Видимая стена (с разрывами под проёмы) */}
+                        {wallSegs.map(([a, b], si) => {
+                          const p1 = pointOnWall(w, a);
+                          const p2 = pointOnWall(w, b);
+                          return (
+                            <line
+                              key={`seg-${si}`}
+                              x1={p1[0] * SCALE}
+                              y1={p1[1] * SCALE}
+                              x2={p2[0] * SCALE}
+                              y2={p2[1] * SCALE}
+                              stroke={strokeColor}
+                              strokeWidth={Math.max(3, w.thickness * SCALE)}
+                              strokeLinecap="square"
+                            />
+                          );
+                        })}
+
+                        {/* Проёмы: двери, окна, технологические проёмы */}
+                        {wallOpenings.map((o: any) => {
+                          const p1 = pointOnWall(w, o.offset);
+                          const p2 = pointOnWall(w, o.offset + o.width);
+                          const oSel = Selection?.type === 'opening' && Selection?.id === o.id;
+                          const dx = (w.x2 - w.x1) / L;
+                          const dy = (w.y2 - w.y1) / L;
+                          const nx = -dy;
+                          const ny = dx;
+                          const doorEnd: [number, number] = [p1[0] + nx * o.width, p1[1] + ny * o.width];
+                          const color = oSel ? '#FCD116' : o.type === 'window' ? '#38BDF8' : o.type === 'door' ? '#F59E0B' : '#A78BFA';
+                          return (
+                            <g key={o.id}>
+                              <line
+                                x1={p1[0] * SCALE}
+                                y1={p1[1] * SCALE}
+                                x2={p2[0] * SCALE}
+                                y2={p2[1] * SCALE}
+                                stroke="transparent"
+                                strokeWidth={14}
+                                style={{ cursor: 'pointer' }}
+                                onMouseDown={(e) => {
+                                  e.stopPropagation();
+                                  setSelection({ type: 'opening', id: o.id });
+                                }}
+                              />
+                              {o.type === 'window' ? (
+                                <>
+                                  <line x1={p1[0] * SCALE} y1={p1[1] * SCALE} x2={p2[0] * SCALE} y2={p2[1] * SCALE}
+                                    stroke={color} strokeWidth={Math.max(3, w.thickness * SCALE * 0.55)} />
+                                  <line x1={(p1[0] + nx * 0.06) * SCALE} y1={(p1[1] + ny * 0.06) * SCALE}
+                                    x2={(p2[0] + nx * 0.06) * SCALE} y2={(p2[1] + ny * 0.06) * SCALE}
+                                    stroke={color} strokeWidth="1.6" />
+                                </>
+                              ) : o.type === 'door' ? (
+                                <>
+                                  <line x1={p1[0] * SCALE} y1={p1[1] * SCALE}
+                                    x2={doorEnd[0] * SCALE} y2={doorEnd[1] * SCALE}
+                                    stroke={color} strokeWidth="2.2" strokeDasharray="4,2" />
+                                  <circle cx={p1[0] * SCALE} cy={p1[1] * SCALE} r="2.4" fill={color} />
+                                </>
+                              ) : (
+                                <line x1={p1[0] * SCALE} y1={p1[1] * SCALE} x2={p2[0] * SCALE} y2={p2[1] * SCALE}
+                                  stroke={color} strokeWidth="2" strokeDasharray="3,3" />
+                              )}
+                            </g>
+                          );
+                        })}
                         {/* Размер перегородки при выделении или в режиме редактора стен */}
                         {(isSelected || (viewMode === 'walls' && !w.loadBearing && lengthM >= 1.2)) && (
                           <text
@@ -2400,7 +2633,7 @@ export default function App() {
                   })}
 
                   {/* Оконные проёмы — из проверенной модели (openings.csv) */}
-                  {PLAN_WINDOWS.map((win) => (
+                  {!showDrawingPlan && PLAN_WINDOWS.map((win) => (
                     <rect
                       key={win.id}
                       x={win.rect[0] * SCALE}
@@ -2495,6 +2728,7 @@ export default function App() {
 
                 {/* 3. ТЕПЛОВАЯ КАРТА ПОКРЫТИЯ WI-FI (РАДИУСЫ ТОЧЕК ДОСТУПА AP) */}
                 {showWifiHeatmap &&
+                  !netReadOnly &&
                   nodes
                     .filter((n) => n.type === 'wifi')
                     .map((ap) => {
@@ -2518,7 +2752,7 @@ export default function App() {
                     })}
 
                 {/* 4. СЛОЙ КАБЕЛЬНЫХ ТРАСС (ОРТОГОНАЛЬНЫЕ И ПРЯМЫЕ ЛИНИИ) */}
-                {cables.map((cab) => {
+                {!netReadOnly && cables.map((cab) => {
                   const cType = CABLE_TYPES.find((t) => t.id === cab.cableType) || CABLE_TYPES[0];
                   const layerObj = layers.find((l) => l.id === cType.layer);
                   if (layerObj && !layerObj.visible) return null;
@@ -2681,7 +2915,7 @@ export default function App() {
                   })}
 
                 {/* 6. СЛОЙ УЗЛОВ ОБОРУДОВАНИЯ (РОУТЕРЫ, КОММУТАТОРЫ, ТОЧКИ WI-FI, ПК, КАМЕРЫ) */}
-                {nodes.map((node) => {
+                {!netReadOnly && nodes.map((node) => {
                   const layerObj = layers.find((l) => l.id === node.layer);
                   if (layerObj && !layerObj.visible) return null;
 
@@ -2891,7 +3125,9 @@ export default function App() {
 
               {/* Список слоев */}
               <div className="overflow-y-auto space-y-1 pr-0.5">
-                {layers.map((layer) => {
+                {layers
+                  .filter((l: any) => !netReadOnly || l.id === 'partitions' || l.id === 'notes')
+                  .map((layer) => {
                   const isActive = activeLayerId === layer.id;
                   const count = layerCounts[layer.id] || 0;
                   return (
@@ -2961,7 +3197,7 @@ export default function App() {
 
             {/* НИЖНЯЯ ЧАСТЬ: КОНТЕКСТНЫЙ ИНСПЕКТОР ОБЪЕКТА (ИЛИ СВОДКА ПРОЕКТА) */}
             <div className="flex-1 overflow-y-auto p-3.5">
-              {Selection.type === 'node' && selectedObject ? (
+              {!netReadOnly && Selection.type === 'node' && selectedObject ? (
                 /* ИНСПЕКТОР ВЫБРАННОГО УЗЛА ОБОРУДОВАНИЯ */
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
@@ -3238,6 +3474,60 @@ export default function App() {
                     </div>
                   );
                 })()
+              ) : Selection.type === 'opening' && selectedObject ? (
+                /* ИНСПЕКТОР ПРОЁМА (ДВЕРЬ / ОКНО / ПРОЁМ) */
+                <div className="space-y-3 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-blue-600">Проём в стене</span>
+                    <button onClick={handleDeleteSelected} className="p-1.5 rounded-lg hover:bg-rose-50 text-rose-500" title="Удалить проём (Del)">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div className={`p-3 rounded-xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                    <div className="font-bold">
+                      {selectedObject.type === 'door' ? 'Дверной проём' : selectedObject.type === 'window' ? 'Оконный проём' : 'Технологический проём'}
+                    </div>
+                    <div className="text-[11px] mt-1 text-slate-500">
+                      Ширина: <strong>{selectedObject.width} м</strong> · от начала стены: <strong>{selectedObject.offset} м</strong>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-semibold text-slate-400 mb-1">Тип проёма</div>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {[
+                        { id: 'door', label: 'Дверь', icon: DoorOpen },
+                        { id: 'window', label: 'Окно', icon: AppWindow },
+                        { id: 'opening', label: 'Проём', icon: SquareDashed },
+                      ].map((t: any) => {
+                        const I = t.icon;
+                        return (
+                          <button
+                            key={t.id}
+                            onClick={() => {
+                              saveHistory();
+                              setOpenings((prev) => prev.map((o: any) => (o.id === selectedObject.id ? { ...o, type: t.id, height: OPENING_DEFAULTS[t.id].height } : o)));
+                            }}
+                            className={`flex items-center justify-center gap-1 py-1.5 rounded-lg border text-[11px] ${selectedObject.type === t.id ? 'bg-blue-600 text-white border-blue-600' : darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}
+                          >
+                            <I className="w-3.5 h-3.5" /> {t.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-semibold text-slate-400 mb-1">Ширина, м</div>
+                    <input
+                      type="number" min="0.4" max="4" step="0.05"
+                      value={selectedObject.width}
+                      onChange={(e) => {
+                        const v = Math.max(0.4, Math.min(4, Number(e.target.value) || 0.4));
+                        setOpenings((prev) => prev.map((o: any) => (o.id === selectedObject.id ? { ...o, width: v } : o)));
+                      }}
+                      className={`w-full px-2 py-1.5 rounded-lg border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}
+                    />
+                  </div>
+                </div>
               ) : Selection.type === 'wall' && selectedObject ? (
                 /* ИНСПЕКТОР ВЫБРАННОЙ СТЕНЫ ИЛИ ПЕРЕГОРОДКИ */
                 <div className="space-y-3 text-xs">
@@ -3285,6 +3575,92 @@ export default function App() {
                         м
                       </strong>{' '}
                       • Толщина: <strong>{selectedObject.thickness} м</strong>
+                    </div>
+                  </div>
+
+                  {/* Толщина перегородки */}
+                  {!selectedObject.loadBearing && (
+                    <div>
+                      <div className="text-[10px] font-semibold text-slate-400 mb-1">Толщина, м</div>
+                      <input
+                        type="number" min="0.05" max="0.6" step="0.01"
+                        value={selectedObject.thickness}
+                        onChange={(e) => {
+                          const v = Math.max(0.05, Math.min(0.6, Number(e.target.value) || 0.1));
+                          setWalls((prev) => prev.map((w: any) => (w.id === selectedObject.id ? { ...w, thickness: v } : w)));
+                        }}
+                        className={`w-full px-2 py-1.5 rounded-lg border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}
+                      />
+                    </div>
+                  )}
+
+                  {/* Проёмы в выбранной стене */}
+                  <div className={`p-3 rounded-xl border space-y-2 ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200/80'}`}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase text-slate-400">Проёмы ({openings.filter((o: any) => o.wallId === selectedObject.id).length})</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {[
+                        { id: 'door', label: 'Дверь', icon: DoorOpen },
+                        { id: 'window', label: 'Окно', icon: AppWindow },
+                        { id: 'opening', label: 'Проём', icon: SquareDashed },
+                      ].map((t: any) => {
+                        const I = t.icon;
+                        return (
+                          <button
+                            key={t.id}
+                            onClick={() => createOpening(selectedObject, t.id, wallLen(selectedObject) / 2)}
+                            className={`flex items-center justify-center gap-1 py-1.5 rounded-lg border text-[11px] transition ${darkMode ? 'bg-slate-800/60 border-slate-700 hover:bg-slate-800' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
+                          >
+                            <I className="w-3.5 h-3.5" /> +{t.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {openings.filter((o: any) => o.wallId === selectedObject.id).map((o: any) => (
+                      <div key={o.id} className="flex items-center gap-2 text-[11px]">
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: o.type === 'window' ? '#38BDF8' : o.type === 'door' ? '#F59E0B' : '#A78BFA' }} />
+                        <span className="flex-1">{o.type === 'door' ? 'Дверь' : o.type === 'window' ? 'Окно' : 'Проём'}, {o.width} м</span>
+                        <input
+                          type="number" min="0.4" max="4" step="0.05" value={o.width}
+                          onChange={(e) => {
+                            const v = Math.max(0.4, Math.min(4, Number(e.target.value) || 0.4));
+                            setOpenings((prev) => prev.map((x: any) => (x.id === o.id ? { ...x, width: v } : x)));
+                          }}
+                          className={`w-16 px-1 py-0.5 rounded border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}
+                        />
+                        <button
+                          onClick={() => { saveHistory(); setOpenings((prev) => prev.filter((x: any) => x.id !== o.id)); }}
+                          className="text-rose-400 hover:text-rose-300"
+                          title="Удалить проём"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : netReadOnly ? (
+                /* СВОДКА ДЛЯ ИНЖЕНЕРА */
+                <div className="space-y-3 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-blue-600">Сводка по стенам</span>
+                    <span className="text-[11px] font-semibold text-blue-600">Козина, 7</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className={`p-2.5 rounded-xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200/80'}`}>
+                      <div className="text-[10px] text-slate-400">Стен / перегородок</div>
+                      <div className="text-base font-bold mt-0.5">{walls.length} шт.</div>
+                    </div>
+                    <div className={`p-2.5 rounded-xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200/80'}`}>
+                      <div className="text-[10px] text-slate-400">Проёмов (двери/окна)</div>
+                      <div className="text-base font-bold mt-0.5">{openings.length} шт.</div>
+                    </div>
+                  </div>
+                  <div className={`p-3 rounded-xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50/70 border-slate-200/80'}`}>
+                    <div className="text-[10px] font-bold uppercase text-slate-400 mb-1">Подсказка</div>
+                    <div className="text-[11px] text-slate-500 leading-relaxed">
+                      Доступны стены, двери, окна, проёмы, линейка и пометки. Оборудование и кабельная сеть скрыты — это зона администратора.
                     </div>
                   </div>
                 </div>

@@ -76,6 +76,7 @@ const EMPTY_PROJECT = () => ({
   cables: [],
   walls: [],
   notes: [],
+  openings: [],
   projectTitle: 'Карта сети — 1 этаж (Козина 7, пом. 1080 + 1079)',
   planRotated: false,
   updatedAt: new Date().toISOString(),
@@ -84,7 +85,10 @@ const EMPTY_PROJECT = () => ({
 let project = EMPTY_PROJECT();
 try {
   const saved = JSON.parse(fs.readFileSync(PROJECT_FILE, 'utf8'));
-  if (saved && Array.isArray(saved.nodes) && Array.isArray(saved.walls)) project = saved;
+  if (saved && Array.isArray(saved.nodes) && Array.isArray(saved.walls)) {
+    project = saved;
+    if (!Array.isArray(project.openings)) project.openings = [];
+  }
 } catch {
   /* первый запуск */
 }
@@ -103,6 +107,10 @@ try {
   if (Array.isArray(planWalls) && planWalls.length) {
     project.walls = planWalls;
     project.planRotated = false;
+    if (Array.isArray(project.openings)) {
+      const wallIds = new Set(planWalls.map((w) => w.id));
+      project.openings = project.openings.filter((o) => o && wallIds.has(o.wallId));
+    }
     project.updatedAt = new Date().toISOString();
   }
 } catch {
@@ -129,6 +137,9 @@ const ENGINEER_KINDS = new Set([
   'wall.add',
   'wall.update',
   'wall.delete',
+  'opening.add',
+  'opening.update',
+  'opening.delete',
   'note.add',
   'note.update',
   'note.delete',
@@ -343,7 +354,17 @@ function applyOne(op) {
     return true;
   }
   const list = arr(
-    entity === 'node' ? 'nodes' : entity === 'cable' ? 'cables' : entity === 'wall' ? 'walls' : entity === 'note' ? 'notes' : ''
+    entity === 'node'
+      ? 'nodes'
+      : entity === 'cable'
+      ? 'cables'
+      : entity === 'wall'
+      ? 'walls'
+      : entity === 'note'
+      ? 'notes'
+      : entity === 'opening'
+      ? 'openings'
+      : ''
   );
   if (!list) return false;
 
@@ -360,7 +381,17 @@ function applyOne(op) {
     return true;
   }
   if (action === 'replace-all' && Array.isArray(op.items)) {
-    project[entity === 'node' ? 'nodes' : entity === 'cable' ? 'cables' : entity === 'wall' ? 'walls' : 'notes'] = op.items;
+    project[
+      entity === 'node'
+        ? 'nodes'
+        : entity === 'cable'
+        ? 'cables'
+        : entity === 'wall'
+        ? 'walls'
+        : entity === 'opening'
+        ? 'openings'
+        : 'notes'
+    ] = op.items;
     return true;
   }
   return false;
@@ -499,6 +530,7 @@ function handleWsMessage(wsClient, msg) {
       cables: Array.isArray(p.cables) ? p.cables : [],
       walls: Array.isArray(p.walls) ? p.walls : [],
       notes: Array.isArray(p.notes) ? p.notes : [],
+      openings: Array.isArray(p.openings) ? p.openings : [],
       projectTitle: String(p.projectTitle || EMPTY_PROJECT().projectTitle),
       planRotated: !!p.planRotated,
       updatedAt: new Date().toISOString(),

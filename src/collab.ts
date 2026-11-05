@@ -25,6 +25,7 @@ export interface SharedProject {
   cables: any[];
   walls: any[];
   notes: any[];
+  openings?: any[];
   projectTitle: string;
   planRotated?: boolean;
 }
@@ -251,6 +252,7 @@ export function diffOps(
     ['cable', prev.cables || [], next.cables || []],
     ['wall', prev.walls || [], next.walls || []],
     ['note', prev.notes || [], next.notes || []],
+    ['opening', prev.openings || [], next.openings || []],
   ];
   for (const [entity, a, b] of ents) {
     const am = new Map<any, any>(a.map((x) => [x.id, x]));
