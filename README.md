@@ -88,6 +88,14 @@ python tools/gen_plan.py
 node server/server.mjs        # PORT=8092 DIST=./dist DATA_DIR=./server
 ```
 
+## Производительность
+
+- Шрифты (Montserrat / Inter / JetBrains Mono) **self-hosted**: 9 вариативных WOFF2 (~230 KB в сборке,
+  браузер грузит только нужные подмножества ~177 KB), `font-display: swap`; Google Fonts CDN убран.
+- JS разбит на `vendor` (React) и `app` — vendor кэшируется отдельно; итоговый gzip ~87 KB.
+- Изображений-фотографий нет (план — SVG-вектор), поэтому WebP/lazy-loading не применимы;
+  `tools/site_perf.py check` проходит (PASS).
+
 ## Проверка
 
 ```bash
