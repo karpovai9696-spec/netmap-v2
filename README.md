@@ -127,3 +127,6 @@ python tools/e2e_collab.py    # вход, роли, realtime (16)
 
 React 18, TypeScript, Vite, Tailwind CSS 3, lucide-react; сервер — Node.js (http + WebSocket, без зависимостей).
 
+## Документация
+
+- [Инструкция инженера: план, стены и проёмы](docs/ENGINEER-GUIDE.md)

@@ -54,7 +54,9 @@ import {
   HardHat,
   DoorOpen,
   AppWindow,
-  SquareDashed
+  SquareDashed,
+  HelpCircle,
+  Lightbulb
 } from 'lucide-react';
 
 import {
@@ -65,6 +67,7 @@ import {
   BUILDING,
 } from './correctPlan';
 import { OfficeDocs } from './OfficeDocs';
+import { EngineerGuideModal, TOOL_HINTS } from './EngineerGuide';
 import planDrawingUrl from './assets/plan-drawing.svg?url';
 import { NET_LAYER, NET_CABLE_TYPE } from './officeNet';
 import { useCollab, diffOps } from './collab';
@@ -367,6 +370,7 @@ export default function App() {
   const printBuildRef = useRef<() => void>(() => {});
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [showPassword, setShowPassword] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
 
   const pushActivity = (userName: string, color: string, text: string) => {
     setActivity((prev) => [
@@ -1815,6 +1819,19 @@ export default function App() {
         {/* Правая группа: Undo/Redo, Wi-Fi Карта, Тема, Экспорт */}
         <div className="flex items-center gap-1.5">
           <button
+            onClick={() => setShowGuide(true)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition ${
+              darkMode
+                ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+                : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+            }`}
+            title="Инструкция по работе с планом"
+          >
+            <HelpCircle className="w-4 h-4" />
+            <span className="hidden lg:inline">{netReadOnly ? 'Как работать' : 'Инструкция'}</span>
+          </button>
+
+          <button
             onClick={handleUndo}
             disabled={history.length === 0}
             className={`p-1.5 rounded-lg border transition ${
@@ -2237,8 +2254,17 @@ export default function App() {
                       );
                     })}
                   </div>
-                  <div className={`p-3 rounded-xl border text-[11px] leading-relaxed ${darkMode ? 'bg-slate-950/70 border-slate-800 text-slate-400' : 'bg-blue-50/60 border-blue-100 text-slate-600'}`}>
-                    <b>Как работать:</b> выберите инструмент → кликните на плане. Дверь/окно/проём ставятся кликом по стене. Перегородку выделяйте и тяните мышью, Del — удалить.
+                  <div className={`p-3 rounded-xl border text-[11px] leading-relaxed space-y-1.5 ${darkMode ? 'bg-slate-950/70 border-slate-800 text-slate-400' : 'bg-blue-50/60 border-blue-100 text-slate-600'}`}>
+                    <div className="font-semibold text-blue-600 dark:text-blue-400">Три шага</div>
+                    <div>1. <b>Стена:</b> W → клик в начале и в конце.</div>
+                    <div>2. <b>Проём:</b> D / O / P → клик по стене.</div>
+                    <div>3. <b>Свойства:</b> V → выделить объект, справа толщина/ширина.</div>
+                    <button
+                      onClick={() => setShowGuide(true)}
+                      className="mt-1 inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 font-semibold hover:underline"
+                    >
+                      <HelpCircle className="w-3.5 h-3.5" /> Открыть инструкцию
+                    </button>
                   </div>
                 </div>
               )}
@@ -2290,20 +2316,22 @@ export default function App() {
               </div>
               )}
 
-              {/* Быстрая памятка по работе со стенами */}
-              <div
-                className={`p-3 rounded-xl border text-[11px] space-y-1.5 ${
-                  darkMode ? 'bg-slate-950/70 border-slate-800 text-slate-400' : 'bg-blue-50/50 border-blue-100 text-slate-600'
-                }`}
-              >
-                <div className="font-semibold text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
-                  <BrickWall className="w-3.5 h-3.5" />
-                  <span>Редактирование стен</span>
+              {/* Быстрая памятка по работе со стенами (для администратора) */}
+              {!netReadOnly && (
+                <div
+                  className={`p-3 rounded-xl border text-[11px] space-y-1.5 ${
+                    darkMode ? 'bg-slate-950/70 border-slate-800 text-slate-400' : 'bg-blue-50/50 border-blue-100 text-slate-600'
+                  }`}
+                >
+                  <div className="font-semibold text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
+                    <BrickWall className="w-3.5 h-3.5" />
+                    <span>Редактирование стен</span>
+                  </div>
+                  <p className="leading-relaxed">
+                    Серо-синие перегородки можно выделять и перетаскивать мышью. Тёмные капитальные стены и пилоны (0.21 м) защищены от сноса.
+                  </p>
                 </div>
-                <p className="leading-relaxed">
-                  Серon-синие перегородки можно выделять и перетаскивать мышью. Тёмные капитальные стены и пилоны (0.21 м) защищены от сноса.
-                </p>
-              </div>
+              )}
             </div>
           </aside>
 
@@ -2348,7 +2376,7 @@ export default function App() {
                         ? 'bg-blue-600 text-white shadow-xs'
                         : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
                     }`}
-                    title={locked ? 'Нет прав: сеть редактирует администратор' : `${t.label} (${t.shortcut})`}
+                    title={locked ? 'Нет прав: сеть редактирует администратор' : `${t.label} (${t.shortcut})${TOOL_HINTS[t.id]?.hint ? ` — ${TOOL_HINTS[t.id].hint}` : ''}`}
                   >
                     <IconComp className="w-3.5 h-3.5" />
                     <span className="hidden xl:inline">{t.label}</span>
@@ -2366,43 +2394,33 @@ export default function App() {
               })}
             </div>
 
-            {/* Контекстная плашка-подсказка при активном инструменте прокладки кабеля или замера */}
-            {(activeTool === 'cable' || activeTool === 'place_node' || activeTool === 'wall' || activeTool === 'ruler') && (
-              <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 px-3.5 py-1.5 rounded-full text-xs font-medium shadow-md border backdrop-blur-md bg-blue-600/95 text-white border-blue-500 flex items-center gap-2">
-                {activeTool === 'cable' && (
-                  <>
-                    <Cable className="w-3.5 h-3.5" />
-                    <span>
-                      {cableStartNodeId
-                        ? 'Теперь кликните по конечному узлу для завершения трассы (Esc — отмена)'
-                        : `Режим прокладки «${activeCableType.short}»: кликните по начальному узлу на чертеже`}
-                    </span>
-                  </>
-                )}
-                {activeTool === 'place_node' && (
-                  <>
-                    <Cpu className="w-3.5 h-3.5" />
-                    <span>
-                      Размещение «{pendingEquipment?.name}»: кликните в любую точку плана (Esc — выход)
-                    </span>
-                  </>
-                )}
-                {activeTool === 'wall' && (
-                  <>
-                    <BrickWall className="w-3.5 h-3.5" />
-                    <span>
-                      {wallDraft
-                        ? 'Кликните вторую точку для фиксации перегородки'
-                        : 'Кликните начальную точку новой перегородки или перетащите существующую'}
-                    </span>
-                  </>
-                )}
-                {activeTool === 'ruler' && (
-                  <>
-                    <Ruler className="w-3.5 h-3.5" />
-                    <span>Кликните две точки на плане для точного замера расстояния в метрах</span>
-                  </>
-                )}
+            {/* Контекстная подсказка активного инструмента */}
+            {TOOL_HINTS[activeTool] && (
+              <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 max-w-[calc(100%-1.5rem)] px-3.5 py-1.5 rounded-full text-xs font-medium shadow-md border backdrop-blur-md bg-blue-600/95 text-white border-blue-500 flex items-center gap-2">
+                <Lightbulb className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">
+                  {activeTool === 'cable' ? (
+                    cableStartNodeId
+                      ? 'Теперь кликните по конечному узлу для завершения трассы (Esc — отмена)'
+                      : `Режим прокладки «${activeCableType.short}»: кликните по начальному узлу на чертеже`
+                  ) : activeTool === 'place_node' ? (
+                    `Размещение «${pendingEquipment?.name}»: кликните в любую точку плана (Esc — выход)`
+                  ) : activeTool === 'wall' && wallDraft ? (
+                    'Кликните вторую точку для фиксации перегородки'
+                  ) : (
+                    <>
+                      <b>{TOOL_HINTS[activeTool].label}:</b> {TOOL_HINTS[activeTool].hint}
+                    </>
+                  )}
+                </span>
+                <button
+                  onClick={() => setShowGuide(true)}
+                  className="shrink-0 p-0.5 rounded hover:bg-white/20 transition"
+                  title="Открыть инструкцию"
+                  aria-label="Открыть инструкцию"
+                >
+                  <HelpCircle className="w-3.5 h-3.5" />
+                </button>
               </div>
             )}
 
@@ -3709,6 +3727,13 @@ export default function App() {
                       Доступны стены, двери, окна, проёмы, линейка и пометки. Оборудование и кабельная сеть скрыты — это зона администратора.
                     </div>
                   </div>
+                  <button
+                    onClick={() => setShowGuide(true)}
+                    className="w-full py-2 px-3 rounded-xl border border-blue-600/30 bg-blue-600/10 hover:bg-blue-600/20 text-blue-600 dark:text-blue-400 font-semibold flex items-center justify-center gap-2 transition cursor-pointer"
+                  >
+                    <HelpCircle className="w-3.5 h-3.5" />
+                    <span>Открыть инструкцию</span>
+                  </button>
                 </div>
               ) : (
                 /* СВОДКА ПРОЕКТА (КОГДА НИЧЕГО НЕ ВЫДЕЛЕНО) */
@@ -3775,6 +3800,17 @@ export default function App() {
             </div>
           </aside>
         </div>
+      )}
+      {showGuide && (
+        <EngineerGuideModal
+          darkMode={darkMode}
+          onClose={() => setShowGuide(false)}
+          onStartWall={() => {
+            setActiveTool('wall');
+            setActiveLayerId('partitions');
+            setShowGuide(false);
+          }}
+        />
       )}
       {showPassword && (
         <PasswordDialog
