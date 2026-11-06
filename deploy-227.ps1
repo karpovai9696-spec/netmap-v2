@@ -49,7 +49,11 @@ $walls = Join-Path $v2 'server\walls.json'
 if (Test-Path $walls) { scp -q $walls serv-diamedika:/tmp/walls.json }
 $openings = Join-Path $v2 'server\openings.json'
 if (Test-Path $openings) { scp -q $openings serv-diamedika:/tmp/openings.json }
-scp -q (Join-Path $v2 'deploy\netmap-v2-setup.sh') serv-diamedika:/tmp/netmap-v2-setup.sh
+$setupPath = Join-Path $v2 'deploy\netmap-v2-setup.sh'
+# принудительно LF: CRLF ломает remote bash
+$setupText = [IO.File]::ReadAllText($setupPath) -replace "`r`n", "`n" -replace "`r", "`n"
+[IO.File]::WriteAllText($setupPath, $setupText, (New-Object System.Text.UTF8Encoding($false)))
+scp -q $setupPath serv-diamedika:/tmp/netmap-v2-setup.sh
 if ($LASTEXITCODE -ne 0) { throw 'scp setup failed' }
 
 Write-Host 'Установка ...'

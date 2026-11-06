@@ -1,0 +1,3 @@
+# Скрипты деплоя должны иметь LF, иначе remote bash падает
+*.sh text eol=lf
+deploy/*.sh text eol=lf
