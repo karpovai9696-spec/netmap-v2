@@ -352,10 +352,8 @@ export default function App() {
     SAVED?.projectTitle ?? 'Карта сети — 1 этаж (Козина 7, пом. 1080 + 1079)'
   );
   const [viewMode, setViewMode] = useState('network'); // 'network' | 'walls' | 'bom'
-  const [planFilter, setPlanFilter] = useState(() => {
-    const saved = SAVED?.planFilter;
-    return saved === '1080' || saved === '1079' ? saved : 'drawing';
-  }); // 'unified' | '1080' | '1079'
+  // Всегда используем актуальный чертёж; устаревшие «модели 1080/1079» убраны из UI.
+  const [planFilter, setPlanFilter] = useState('drawing');
   const [underlayOpacity, setUnderlayOpacity] = useState(SAVED?.underlayOpacity ?? 95);
   const [showGrid, setShowGrid] = useState(SAVED?.showGrid ?? true);
   const [showWifiHeatmap, setShowWifiHeatmap] = useState(SAVED?.showWifiHeatmap ?? true);
@@ -1373,7 +1371,8 @@ export default function App() {
         if (Array.isArray(data.openings)) setOpenings(data.openings);
         if (data.activeLayerId) setActiveLayerId(data.activeLayerId);
         if (typeof data.darkMode === 'boolean') setDarkMode(data.darkMode);
-        if (data.planFilter) setPlanFilter(data.planFilter);
+        // старые проекты могли хранить planFilter 1080/1079 — игнорируем, всегда чертёж
+        setPlanFilter('drawing');
         if (typeof data.underlayOpacity === 'number') setUnderlayOpacity(data.underlayOpacity);
         if (data.calibration) setCalibration(data.calibration);
         if (typeof data.zoom === 'number') setZoom(data.zoom);
@@ -1678,19 +1677,17 @@ export default function App() {
 
           {/* Селектор подложки (единый план или отдельные секции) */}
           <div className="hidden md:flex items-center gap-1.5">
-            <select
-              value={planFilter}
-              onChange={(e) => setPlanFilter(e.target.value)}
-              className={`text-xs font-medium rounded-lg px-2.5 py-1.5 border outline-none transition cursor-pointer ${
+            <div
+              className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border ${
                 darkMode
-                  ? 'bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-750'
-                  : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                  ? 'bg-slate-800 border-slate-700 text-slate-200'
+                  : 'bg-slate-50 border-slate-200 text-slate-700'
               }`}
+              title="Показывается актуальный чертёж всего объекта (пом. 1080 + 1079)"
             >
-              <option value="drawing">Чертёж: актуальный (весь объект)</option>
-              <option value="1080">Модель: только пом. 1080</option>
-              <option value="1079">Модель: только пом. 1079</option>
-            </select>
+              <FileText className="w-3.5 h-3.5 text-blue-500" />
+              <span>Чертёж: актуальный (весь объект)</span>
+            </div>
 
             {/* Компактный поповер калибровки и прозрачности подложки (вместо загромождения правой панели!) */}
             <div className="relative">
