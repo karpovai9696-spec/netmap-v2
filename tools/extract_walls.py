@@ -25,33 +25,37 @@ for l in (lines if lines is not None else []):
         vs.append([min(x1, x2), y1, y2])
 
 def merge(lines, orient):
-    # lines: [coord, a, b]; merge parallel segments close in coord and overlapping, then merge collinear intervals
+    # double-line walls: merge parallel segments within 6 px with strong overlap -> centreline + thickness
     lines = sorted(lines, key=lambda t: (t[0], t[1]))
     clusters = []
     for c, a, b in lines:
         best = None
+        best_ov = 0
         for cl in clusters:
-            cc = sum(cl["c"]) / len(cl["c"])
-            if abs(c - cc) <= 2.5:
+            cc = sum(cl["cs"]) / len(cl["cs"])
+            if abs(c - cc) <= 6.0:
                 ov = min(b, cl["b"]) - max(a, cl["a"])
-                if ov >= -4:
-                    best = cl; break
+                minlen = min(b - a, cl["b"] - cl["a"])
+                if minlen > 0 and ov >= 0.6 * minlen and ov > best_ov:
+                    best = cl; best_ov = ov
         if best is None:
-            clusters.append({"c": [c], "a": a, "b": b})
+            clusters.append({"cs": [c], "a": a, "b": b})
         else:
-            best["c"].append(c); best["a"] = min(best["a"], a); best["b"] = max(best["b"], b)
-    # повторно слить пересекающиеся интервалы в одной полосе
+            best["cs"].append(c); best["a"] = min(best["a"], a); best["b"] = max(best["b"], b)
+    # merge remaining collinear intervals in the same band
     out = []
     for cl in clusters:
-        c = sum(cl["c"]) / len(cl["c"])
-        out.append([c, cl["a"], cl["b"]])
+        c = sum(cl["cs"]) / len(cl["cs"])
+        spread = (max(cl["cs"]) - min(cl["cs"])) if len(cl["cs"]) > 1 else 0
+        out.append([c, cl["a"], cl["b"], spread])
     out.sort(key=lambda t: (t[0], t[1]))
     merged = []
-    for c, a, b in out:
+    for c, a, b, spread in out:
         if merged and abs(c - merged[-1][0]) <= 2.0 and a - merged[-1][2] <= 2.0:
             merged[-1][1] = min(merged[-1][1], a); merged[-1][2] = max(merged[-1][2], b)
+            merged[-1][3] = max(merged[-1][3], spread)
         else:
-            merged.append([c, a, b])
+            merged.append([c, a, b, spread])
     return [m for m in merged if m[2] - m[1] >= 14]
 
 hm = merge(hs, True)
@@ -61,12 +65,14 @@ def to_m(px, py):
     return ((px) / (X1 - X0) * BW, (py) / (Y1 - Y0) * BD)
 
 walls = []
-for y, a, b in hm:
+for y, a, b, spread in hm:
     x1, y1 = to_m(a, y); x2, y2 = to_m(b, y)
-    walls.append({"x1": round(x1, 2), "y1": round(y1, 2), "x2": round(x2, 2), "y2": round(y2, 2)})
-for x, a, b in vm:
+    th = max(0.08, min(0.4, round((spread if spread > 1.5 else 4) * BD / (Y1 - Y0), 2)))
+    walls.append({"x1": round(x1, 2), "y1": round(y1, 2), "x2": round(x2, 2), "y2": round(y2, 2), "thickness": th})
+for x, a, b, spread in vm:
     x1, y1 = to_m(x, a); x2, y2 = to_m(x, b)
-    walls.append({"x1": round(x1, 2), "y1": round(y1, 2), "x2": round(x2, 2), "y2": round(y2, 2)})
+    th = max(0.08, min(0.4, round((spread if spread > 1.5 else 4) * BW / (X1 - X0), 2)))
+    walls.append({"x1": round(x1, 2), "y1": round(y1, 2), "x2": round(x2, 2), "y2": round(y2, 2), "thickness": th})
 
 print("raw h/v:", len(hs), len(vs), "merged:", len(hm), len(vm), "total:", len(walls))
 

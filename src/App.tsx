@@ -1833,7 +1833,7 @@ export default function App() {
           }`}
         >
           <button
-            onClick={() => setViewMode('network')}
+            onClick={() => { setViewMode('network'); setShowExistingWalls(false); setShowUnderlay(true); }}
             className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition ${
               viewMode === 'network'
                 ? 'bg-blue-600 text-white shadow-xs'
@@ -1849,6 +1849,7 @@ export default function App() {
               setViewMode('walls');
               setActiveTool('wall');
               setShowExistingWalls(true);
+              setShowUnderlay(false);
             }}
             className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition ${
               viewMode === 'walls'
@@ -3307,7 +3308,13 @@ export default function App() {
               {/* Отображение подложки и старых стен */}
               <div className="flex items-center gap-1.5 mb-2">
                 <button
-                  onClick={() => setShowExistingWalls((v) => !v)}
+                  onClick={() => {
+                    setShowExistingWalls((v) => {
+                      const next = !v;
+                      if (next) setShowUnderlay(false);
+                      return next;
+                    });
+                  }}
                   className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-medium transition ${
                     showExistingWalls
                       ? 'bg-blue-600/10 border-blue-500/40 text-blue-600 dark:text-blue-400'
@@ -3319,13 +3326,19 @@ export default function App() {
                   Стены модели
                 </button>
                 <button
-                  onClick={() => setShowUnderlay((v) => !v)}
+                  onClick={() => {
+                    setShowUnderlay((v) => {
+                      const next = !v;
+                      if (next) setShowExistingWalls(false);
+                      return next;
+                    });
+                  }}
                   className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-medium transition ${
                     showUnderlay
                       ? 'bg-blue-600/10 border-blue-500/40 text-blue-600 dark:text-blue-400'
                       : 'border-slate-200 dark:border-slate-700 text-slate-400'
                   }`}
-                  title="Показать/скрыть подложку-чертёж (старые стены остаются)"
+                  title="Показать/скрыть растровую подложку-чертёж. Подложка не меняется при редактировании модели — это картинка."
                 >
                   {showUnderlay ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
                   Чертёж

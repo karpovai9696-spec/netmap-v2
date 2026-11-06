@@ -8,7 +8,7 @@ for i, w in enumerate(raw, 1):
         "id": f"DW-{i:03d}",
         "name": "Стена (с чертежа)",
         "x1": w["x1"], "y1": w["y1"], "x2": w["x2"], "y2": w["y2"],
-        "thickness": 0.12,
+        "thickness": w.get("thickness", 0.12),
         "loadBearing": False,
         "block": "A" if (w["x1"] + w["x2"]) / 2 < 15.6 else "B",
         "kind": "wall",
