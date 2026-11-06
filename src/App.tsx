@@ -61,12 +61,12 @@ import {
 
 import {
   ROOMS as PLAN_ROOMS,
-  WALLS as PLAN_WALLS,
   EXTERIOR_ENTRIES as PLAN_EXTERIOR,
   WINDOWS as PLAN_WINDOWS,
   BUILDING,
 } from './correctPlan';
 import { OfficeDocs } from './OfficeDocs';
+import { DRAWING_WALLS } from './drawingWalls';
 import { EngineerGuideModal, TOOL_HINTS } from './EngineerGuide';
 import planDrawingUrl from './assets/plan-drawing.svg?url';
 import { NET_LAYER, NET_CABLE_TYPE } from './officeNet';
@@ -101,7 +101,14 @@ const CEILING_HEIGHT = 3.96; // h = 3.96м по паспорту БТИ
 // Метры; единая система координат: пом. 1080 слева + пом. 1079 справа.
 // ============================================================================
 const INITIAL_ROOMS = PLAN_ROOMS;
-const INITIAL_WALLS = PLAN_WALLS;
+const INITIAL_WALLS = DRAWING_WALLS;
+// если в localStorage осталась старая CSV-модель (id вида A-W/B-W) — заменяем её на модель с чертежа
+const SAVED_WALLS = (() => {
+  const saved = Array.isArray(SAVED?.walls) ? SAVED.walls : null;
+  if (!saved || !saved.length) return null;
+  if (saved.some((w: any) => /^[AB]-W/.test(String(w?.id || '')))) return null;
+  return saved;
+})();
 const EXTERIOR_ENTRIES = PLAN_EXTERIOR;
 
 // Демо-объекты Gemini были заданы в старой системе 32.46 x 16.21 м — приводим к реальной геометрии
@@ -557,7 +564,7 @@ export default function App() {
     const ids = new Set(saved.map((l: any) => l.id));
     return [...saved, ...INITIAL_LAYERS.filter((l: any) => !ids.has(l.id))];
   });
-  const [walls, setWalls] = useState(SAVED?.walls ?? INITIAL_WALLS);
+  const [walls, setWalls] = useState(SAVED_WALLS ?? INITIAL_WALLS);
   const [openings, setOpenings] = useState<any[]>(SAVED?.openings ?? []);
   const [nodes, setNodes] = useState(() => SAVED?.nodes ?? DEMO_NODES.map((n) => ({ ...n })));
   const nodesRef = useRef<any[]>([]);
@@ -616,7 +623,7 @@ export default function App() {
   const [mouseMeters, setMouseMeters] = useState({ x: 15.0, y: 6.0 });
   const [rulerPoints, setRulerPoints] = useState(null); // { x1, y1, x2, y2, active }
   const [wallDraft, setWallDraft] = useState(null); // { x1, y1, x2, y2 }
-  const [showExistingWalls, setShowExistingWalls] = useState(true);
+  const [showExistingWalls, setShowExistingWalls] = useState(false);
   const [showUnderlay, setShowUnderlay] = useState(true);
   const [redoStack, setRedoStack] = useState<any[]>([]);
 
@@ -1844,6 +1851,7 @@ export default function App() {
             onClick={() => {
               setViewMode('walls');
               setActiveTool('wall');
+              setShowExistingWalls(true);
             }}
             className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition ${
               viewMode === 'walls'
@@ -3308,10 +3316,10 @@ export default function App() {
                       ? 'bg-blue-600/10 border-blue-500/40 text-blue-600 dark:text-blue-400'
                       : 'border-slate-200 dark:border-slate-700 text-slate-400'
                   }`}
-                  title="Показать/скрыть существующие стены из модели, чтобы их можно было редактировать и удалять"
+                  title="Показать/скрыть существующие стены модели (сняты с актуального чертежа), чтобы их можно было редактировать и удалять"
                 >
                   {showExistingWalls ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-                  Старые стены
+                  Стены модели
                 </button>
                 <button
                   onClick={() => setShowUnderlay((v) => !v)}

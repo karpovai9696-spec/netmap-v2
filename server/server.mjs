@@ -106,7 +106,8 @@ function loadDocs() {
 try {
   const planWalls = JSON.parse(fs.readFileSync(PLAN_WALLS_FILE, 'utf8'));
   if (Array.isArray(planWalls) && planWalls.length) {
-    project.walls = planWalls;
+    const custom = Array.isArray(project.walls) ? project.walls.filter((w) => w && w.custom) : [];
+    project.walls = [...planWalls, ...custom];
     project.planRotated = false;
     if (Array.isArray(project.openings)) {
       const wallIds = new Set(planWalls.map((w) => w.id));
