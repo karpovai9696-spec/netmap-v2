@@ -75,6 +75,8 @@ export function useCollab(opts: {
   const manualCloseRef = useRef(false);
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initializedRef = useRef(false);
+  const lastMessageRef = useRef(Date.now());
+  const attemptsRef = useRef(0);
 
   const connect = useCallback((token: string) => {
     if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
@@ -90,10 +92,31 @@ export function useCollab(opts: {
       return;
     }
     wsRef.current = ws;
+    lastMessageRef.current = Date.now();
     // при реконнекте не сбрасываем экран в полноэкранную загрузку
     setMode((m) => (m === 'demo' ? m : initializedRef.current ? 'offline' : 'loading'));
 
+    ws.onopen = () => {
+      attemptsRef.current = 0;
+      lastMessageRef.current = Date.now();
+    };
+
+    // heartbeat: если сервер не отвечает дольше 45 с — соединение считается мёртвым
+    const heartbeat = setInterval(() => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      if (Date.now() - lastMessageRef.current > 20000) {
+        try { ws.close(); } catch { /* ignore */ }
+        return;
+      }
+      try {
+        ws.send(JSON.stringify({ type: 'ping', t: Date.now() }));
+      } catch {
+        try { ws.close(); } catch { /* ignore */ }
+      }
+    }, 8000);
+
     ws.onmessage = (ev) => {
+      lastMessageRef.current = Date.now();
       let msg: any;
       try {
         msg = JSON.parse(ev.data);
@@ -122,37 +145,80 @@ export function useCollab(opts: {
       }
     };
 
-    ws.onclose = async () => {
+    ws.onclose = () => {
+      clearInterval(heartbeat);
       wsRef.current = null;
       setUsers([]);
       if (manualCloseRef.current) return;
       setMode((m) => (m === 'demo' ? m : 'offline'));
       if (retryRef.current) clearTimeout(retryRef.current);
 
-      // отличаем «сервер недоступен» от «токен истёк/недействителен»
+      // реконнект планируем сразу (с backoff), не дожидаясь проверки токена
+      const delay = Math.min(8000, 1200 * Math.pow(2, Math.min(attemptsRef.current, 3)));
+      attemptsRef.current += 1;
+      retryRef.current = setTimeout(() => {
+        if (tokenRef.current && !manualCloseRef.current) connect(tokenRef.current);
+      }, delay);
+
+      // параллельно проверяем, не истёк ли токен (с таймаутом, чтобы не висеть)
       const token = tokenRef.current;
-      if (token) {
+      if (!token) return;
+      const checkAuth = async () => {
         try {
-          await apiFetch('/api/me', { headers: authHeader(token) });
+          const init: RequestInit = { headers: authHeader(token) };
+          if (typeof AbortSignal !== 'undefined' && (AbortSignal as any).timeout) {
+            init.signal = (AbortSignal as any).timeout(5000);
+          }
+          await apiFetch('/api/me', init);
         } catch (e: any) {
           if (e?.status === 401) {
+            if (retryRef.current) clearTimeout(retryRef.current);
             localStorage.removeItem(TOKEN_KEY);
             tokenRef.current = null;
+            initializedRef.current = false;
             setUser(null);
             setUsers([]);
             setMode('auth');
-            return;
           }
         }
-      }
-      retryRef.current = setTimeout(() => {
-        if (tokenRef.current && !manualCloseRef.current) connect(tokenRef.current);
-      }, 2500);
+      };
+      void checkAuth();
     };
     ws.onerror = () => {
       /* close сработает следом */
     };
   }, []);
+
+  // при возврате вкладки/сети проверяем соединение и переподключаемся без ожидания
+  useEffect(() => {
+    const reconnectNow = () => {
+      if (!tokenRef.current || manualCloseRef.current) return;
+      const ws = wsRef.current;
+      const stale = Date.now() - lastMessageRef.current > 20000;
+      if (!ws || ws.readyState !== WebSocket.OPEN || stale) {
+        if (retryRef.current) clearTimeout(retryRef.current);
+        try { ws?.close(); } catch { /* ignore */ }
+        connect(tokenRef.current);
+      }
+    };
+    const onOnline = () => reconnectNow();
+    const onOffline = () => {
+      if (manualCloseRef.current) return;
+      setMode((m) => (m === 'demo' ? m : 'offline'));
+      try { wsRef.current?.close(); } catch { /* ignore */ }
+    };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') reconnectNow();
+    };
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [connect]);
 
   // первичная загрузка: есть ли сервер и нужно ли входить (с ретраями, без ложного демо)
   useEffect(() => {

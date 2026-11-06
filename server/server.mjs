@@ -461,6 +461,7 @@ function handleWsConnection(req, socket) {
       `Sec-WebSocket-Accept: ${wsAccept(req.headers['sec-websocket-key'])}\r\n\r\n`
   );
   socket.setNoDelay(true);
+  socket.setKeepAlive(true, 15000);
 
   const wsClient = {
     socket,
@@ -550,6 +551,12 @@ function handleWsConnection(req, socket) {
 function handleWsMessage(wsClient, msg) {
   const { user } = wsClient;
   if (!msg || typeof msg !== 'object') return;
+
+  // heartbeat: клиент раз в 20 с проверяет, что соединение живое
+  if (msg.type === 'ping') {
+    send(wsClient, { type: 'pong', t: msg.t || Date.now() });
+    return;
+  }
 
   if (msg.type === 'cursor') {
     const x = Number(msg.x);
