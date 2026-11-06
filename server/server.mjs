@@ -19,6 +19,7 @@ const DIST = process.env.DIST || path.join(ROOT, '..', 'netmap-v2', 'dist');
 const DATA_DIR = process.env.DATA_DIR || ROOT;
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const PROJECT_FILE = path.join(DATA_DIR, 'project.json');
+const SESSION_FILE = path.join(DATA_DIR, 'sessions.json');
 const DOCS_FILE = path.join(DATA_DIR, 'docs.json');
 const PLAN_WALLS_FILE = path.join(DATA_DIR, 'walls.json');
 const SESSION_TTL = 72 * 3600 * 1000; // 72 часа
@@ -157,9 +158,48 @@ function canApply(user, op) {
 const sessions = new Map(); // token -> { login, expires }
 const loginAttempts = new Map(); // ip -> { count, first }
 
+let sessionSaveTimer = null;
+function persistSessions() {
+  clearTimeout(sessionSaveTimer);
+  sessionSaveTimer = setTimeout(() => {
+    try {
+      const now = Date.now();
+      const obj = {};
+      for (const [token, s] of sessions) {
+        if (s && s.expires > now) obj[token] = s;
+      }
+      const tmp = SESSION_FILE + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(obj));
+      fs.chmodSync(tmp, 0o600);
+      fs.renameSync(tmp, SESSION_FILE);
+    } catch (e) {
+      console.error('sessions save failed:', e.message);
+    }
+  }, 150);
+}
+
+function loadSessions() {
+  try {
+    const data = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
+    const now = Date.now();
+    let count = 0;
+    for (const [token, s] of Object.entries(data)) {
+      if (s && s.expires > now && findUser(s.login)) {
+        sessions.set(token, s);
+        count += 1;
+      }
+    }
+    if (count) console.log(`[netmap-v2] sessions restored: ${count}`);
+  } catch {
+    /* первый запуск или файла нет */
+  }
+}
+loadSessions();
+
 function newSession(user) {
   const token = crypto.randomBytes(32).toString('hex');
   sessions.set(token, { login: user.login, expires: Date.now() + SESSION_TTL });
+  persistSessions();
   return token;
 }
 
@@ -168,7 +208,10 @@ function sessionUser(req) {
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   const s = token && sessions.get(token);
   if (!s || s.expires < Date.now()) {
-    if (token) sessions.delete(token);
+    if (token) {
+      sessions.delete(token);
+      persistSessions();
+    }
     return null;
   }
   return findUser(s.login) || null;
@@ -623,6 +666,7 @@ const server = http.createServer(async (req, res) => {
       saveUsers(users);
       // инвалидируем все сессии пользователя
       for (const [tok, s] of sessions) if (s.login.toLowerCase() === user.login.toLowerCase()) sessions.delete(tok);
+      persistSessions();
       return json(res, 200, { ok: true });
     }
 

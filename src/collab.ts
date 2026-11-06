@@ -33,6 +33,7 @@ export interface SharedProject {
 type Mode = 'loading' | 'auth' | 'online' | 'offline' | 'demo';
 
 const TOKEN_KEY = 'netmap-v2.auth.v2';
+const SERVER_EXPECTED = /^(localhost|127\.|192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(location.hostname);
 
 async function apiFetch(path: string, init: RequestInit = {}) {
   const res = await fetch(path, { cache: 'no-store', ...init });
@@ -42,7 +43,11 @@ async function apiFetch(path: string, init: RequestInit = {}) {
   } catch {
     /* not json */
   }
-  if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+  if (!res.ok) {
+    const failure: any = new Error(data?.error || `HTTP ${res.status}`);
+    failure.status = res.status;
+    throw failure;
+  }
   return data;
 }
 
@@ -69,6 +74,7 @@ export function useCollab(opts: {
   const tokenRef = useRef<string | null>(localStorage.getItem(TOKEN_KEY));
   const manualCloseRef = useRef(false);
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initializedRef = useRef(false);
 
   const connect = useCallback((token: string) => {
     if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
@@ -84,7 +90,8 @@ export function useCollab(opts: {
       return;
     }
     wsRef.current = ws;
-    setMode((m) => (m === 'demo' ? m : 'loading'));
+    // при реконнекте не сбрасываем экран в полноэкранную загрузку
+    setMode((m) => (m === 'demo' ? m : initializedRef.current ? 'offline' : 'loading'));
 
     ws.onmessage = (ev) => {
       let msg: any;
@@ -94,6 +101,7 @@ export function useCollab(opts: {
         return;
       }
       if (msg.type === 'init') {
+        initializedRef.current = true;
         setUser(msg.you);
         setUsers(Array.isArray(msg.users) ? msg.users : []);
         setMode('online');
@@ -114,12 +122,29 @@ export function useCollab(opts: {
       }
     };
 
-    ws.onclose = () => {
+    ws.onclose = async () => {
       wsRef.current = null;
       setUsers([]);
       if (manualCloseRef.current) return;
       setMode((m) => (m === 'demo' ? m : 'offline'));
       if (retryRef.current) clearTimeout(retryRef.current);
+
+      // отличаем «сервер недоступен» от «токен истёк/недействителен»
+      const token = tokenRef.current;
+      if (token) {
+        try {
+          await apiFetch('/api/me', { headers: authHeader(token) });
+        } catch (e: any) {
+          if (e?.status === 401) {
+            localStorage.removeItem(TOKEN_KEY);
+            tokenRef.current = null;
+            setUser(null);
+            setUsers([]);
+            setMode('auth');
+            return;
+          }
+        }
+      }
       retryRef.current = setTimeout(() => {
         if (tokenRef.current && !manualCloseRef.current) connect(tokenRef.current);
       }, 2500);
@@ -129,10 +154,12 @@ export function useCollab(opts: {
     };
   }, []);
 
-  // первичная загрузка: есть ли сервер и нужно ли входить
+  // первичная загрузка: есть ли сервер и нужно ли входить (с ретраями, без ложного демо)
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    let bootTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const boot = async () => {
       let cfg: any = null;
       try {
         cfg = await apiFetch('/api/config');
@@ -140,10 +167,18 @@ export function useCollab(opts: {
         cfg = null;
       }
       if (cancelled) return;
+
       if (!cfg?.authRequired) {
+        if (cfg === null && SERVER_EXPECTED) {
+          // наш сервер временно недоступен — не уходим в демо-режим
+          setMode('offline');
+          bootTimer = setTimeout(boot, 3000);
+          return;
+        }
         setMode('demo');
         return;
       }
+
       const token = tokenRef.current;
       if (!token) {
         setMode('auth');
@@ -154,14 +189,23 @@ export function useCollab(opts: {
         if (cancelled) return;
         setUser(me.user);
         connect(token);
-      } catch {
-        localStorage.removeItem(TOKEN_KEY);
-        tokenRef.current = null;
-        setMode('auth');
+      } catch (e: any) {
+        if (cancelled) return;
+        if (e?.status === 401) {
+          localStorage.removeItem(TOKEN_KEY);
+          tokenRef.current = null;
+          setMode('auth');
+        } else {
+          setMode('offline');
+          bootTimer = setTimeout(boot, 3000);
+        }
       }
-    })();
+    };
+
+    boot();
     return () => {
       cancelled = true;
+      if (bootTimer) clearTimeout(bootTimer);
     };
   }, [connect]);
 
@@ -191,6 +235,7 @@ export function useCollab(opts: {
     wsRef.current?.close();
     wsRef.current = null;
     tokenRef.current = null;
+    initializedRef.current = false;
     localStorage.removeItem(TOKEN_KEY);
     setUser(null);
     setUsers([]);
