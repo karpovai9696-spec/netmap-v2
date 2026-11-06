@@ -66,7 +66,7 @@ import {
   BUILDING,
 } from './correctPlan';
 import { OfficeDocs } from './OfficeDocs';
-import { DRAWING_WALLS } from './drawingWalls';
+import { DRAWING_WALLS, DRAWING_OPENINGS } from './drawingWalls';
 import { EngineerGuideModal, TOOL_HINTS } from './EngineerGuide';
 import planDrawingUrl from './assets/plan-drawing.svg?url';
 import { NET_LAYER, NET_CABLE_TYPE } from './officeNet';
@@ -107,6 +107,7 @@ const SAVED_WALLS = (() => {
   const saved = Array.isArray(SAVED?.walls) ? SAVED.walls : null;
   if (!saved || !saved.length) return null;
   if (saved.some((w: any) => /^[AB]-W/.test(String(w?.id || '')))) return null;
+  if (saved.length > 100) return null; // старый автоэкстракт (142 стены)
   return saved;
 })();
 const EXTERIOR_ENTRIES = PLAN_EXTERIOR;
@@ -484,7 +485,7 @@ export default function App() {
       nodes: DEMO_NODES.map((n) => ({ ...n })),
       cables: INITIAL_CABLES.map((c) => ({ ...c })),
       walls: INITIAL_WALLS.map((w) => ({ ...w })),
-      openings: [],
+      openings: DRAWING_OPENINGS.map((o: any) => ({ ...o })),
       notes: [
         { id: 'NOTE-1', x: nx, y: ny, text: 'Высота потолка h = 3.96 м (разводка в лотках)', layer: 'notes' },
         { id: 'NOTE-2', x: 15.63, y: 1.4, text: 'Стык планов 1080 и 1079', layer: 'notes' },
@@ -563,7 +564,9 @@ export default function App() {
     return [...saved, ...INITIAL_LAYERS.filter((l: any) => !ids.has(l.id))];
   });
   const [walls, setWalls] = useState(SAVED_WALLS ?? INITIAL_WALLS);
-  const [openings, setOpenings] = useState<any[]>(SAVED?.openings ?? []);
+  const [openings, setOpenings] = useState<any[]>(
+    SAVED?.openings && SAVED.openings.length ? SAVED.openings : DRAWING_OPENINGS.map((o: any) => ({ ...o }))
+  );
   const [nodes, setNodes] = useState(() => SAVED?.nodes ?? DEMO_NODES.map((n) => ({ ...n })));
   const nodesRef = useRef<any[]>([]);
   nodesRef.current = nodes;
@@ -1122,11 +1125,7 @@ export default function App() {
   const startWallEndDrag = (e, wall, end) => {
     e.stopPropagation();
     setSelection({ type: 'wall', id: wall.id });
-    if (wall.loadBearing) {
-      triggerToast('Несущую стену нельзя менять — только удалить');
-      return;
-    }
-    saveHistory();
+saveHistory();
     setDraggingItem({ type: 'wall-end', id: wall.id, end });
   };
 
@@ -1146,9 +1145,6 @@ export default function App() {
     }
     setSelection({ type: 'wall', id: wall.id });
 
-    if (wall.loadBearing) {
-      return; // Несущие стены двигать нельзя
-    }
     const partLayer = layers.find((l) => l.id === 'partitions');
     if (partLayer?.locked) {
       triggerToast('Слой перегородок заблокирован');
@@ -2693,7 +2689,7 @@ export default function App() {
                         key={w.id}
                         opacity={baseOpacity}
                         onMouseDown={(e) => handleWallMouseDown(e, w)}
-                        className={w.loadBearing ? 'cursor-pointer' : 'cursor-move'}
+                        className="cursor-move"
                       >
                         {/* Невидимая широкая зона для удобного клика по тонкой перегородке */}
                         <line
@@ -2734,7 +2730,14 @@ export default function App() {
                           const doorEnd: [number, number] = [p1[0] + nx * o.width, p1[1] + ny * o.width];
                           const color = oSel ? '#FCD116' : o.type === 'window' ? '#38BDF8' : o.type === 'door' ? '#F59E0B' : '#A78BFA';
                           return (
-                            <g key={o.id}>
+                            <g
+                              key={o.id}
+                              style={{ cursor: 'pointer' }}
+                              onMouseDown={(e) => {
+                                e.stopPropagation();
+                                setSelection({ type: 'opening', id: o.id });
+                              }}
+                            >
                               <line
                                 x1={p1[0] * SCALE}
                                 y1={p1[1] * SCALE}
@@ -2771,7 +2774,7 @@ export default function App() {
                           );
                         })}
                         {/* Размер перегородки при выделении или в режиме редактора стен */}
-                        {isSelected && !w.loadBearing && (
+                        {isSelected && (
                           <>
                             <circle
                               cx={w.x1 * SCALE}
@@ -3757,15 +3760,13 @@ export default function App() {
                     <span className="text-[11px] font-bold uppercase tracking-wider text-blue-600">
                       Конструкция стены
                     </span>
-                    {!selectedObject.loadBearing && (
-                      <button
+                    <button
                         onClick={handleDeleteSelected}
                         className="p-1.5 rounded-lg hover:bg-rose-50 text-rose-500"
-                        title="Демонтировать перегородку"
+                        title="Удалить стену"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
-                    )}
                   </div>
 
                   <div
@@ -3784,7 +3785,7 @@ export default function App() {
                       Тип:{' '}
                       <strong>
                         {selectedObject.loadBearing
-                          ? 'Капитальная / Несущая (защищена)'
+                          ? 'Несущая (редактируемая)'
                           : 'Перегородка (редактируемая)'}
                       </strong>
                     </div>
@@ -3800,21 +3801,19 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Толщина перегородки */}
-                  {!selectedObject.loadBearing && (
-                    <div>
-                      <div className="text-[10px] font-semibold text-slate-400 mb-1">Толщина, м</div>
-                      <input
-                        type="number" min="0.05" max="0.6" step="0.01"
-                        value={selectedObject.thickness}
-                        onChange={(e) => {
-                          const v = Math.max(0.05, Math.min(0.6, Number(e.target.value) || 0.1));
-                          setWalls((prev) => prev.map((w: any) => (w.id === selectedObject.id ? { ...w, thickness: v } : w)));
-                        }}
-                        className={`w-full px-2 py-1.5 rounded-lg border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}
-                      />
-                    </div>
-                  )}
+                  {/* Толщина стены */}
+                  <div>
+                    <div className="text-[10px] font-semibold text-slate-400 mb-1">Толщина, м</div>
+                    <input
+                      type="number" min="0.05" max="0.7" step="0.01"
+                      value={selectedObject.thickness}
+                      onChange={(e) => {
+                        const v = Math.max(0.05, Math.min(0.7, Number(e.target.value) || 0.1));
+                        setWalls((prev) => prev.map((w: any) => (w.id === selectedObject.id ? { ...w, thickness: v } : w)));
+                      }}
+                      className={`w-full px-2 py-1.5 rounded-lg border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}
+                    />
+                  </div>
 
                   {/* Проёмы в выбранной стене */}
                   <div className={`p-3 rounded-xl border space-y-2 ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200/80'}`}>

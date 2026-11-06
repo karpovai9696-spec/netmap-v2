@@ -22,6 +22,7 @@ const PROJECT_FILE = path.join(DATA_DIR, 'project.json');
 const SESSION_FILE = path.join(DATA_DIR, 'sessions.json');
 const DOCS_FILE = path.join(DATA_DIR, 'docs.json');
 const PLAN_WALLS_FILE = path.join(DATA_DIR, 'walls.json');
+const PLAN_OPENINGS_FILE = path.join(DATA_DIR, 'openings.json');
 const SESSION_TTL = 72 * 3600 * 1000; // 72 часа
 const MAX_OPS_PER_SECOND = 60;
 
@@ -117,6 +118,24 @@ try {
   }
 } catch {
   /* нет файла — оставляем стены из project.json */
+}
+
+// проёмы из точной модели: засеваем один раз, дальше сохраняем правки пользователей
+try {
+  const planOpenings = JSON.parse(fs.readFileSync(PLAN_OPENINGS_FILE, 'utf8'));
+  if (Array.isArray(planOpenings) && planOpenings.length) {
+    const wallIds = new Set(project.walls.map((w) => w.id));
+    if (project.openingsVersion !== 1) {
+      project.openings = planOpenings.filter((o) => o && wallIds.has(o.wallId));
+      project.openingsVersion = 1;
+      project.updatedAt = new Date().toISOString();
+      console.log(`[netmap-v2] openings seeded: ${project.openings.length}`);
+    } else {
+      project.openings = (Array.isArray(project.openings) ? project.openings : []).filter((o) => o && wallIds.has(o.wallId));
+    }
+  }
+} catch {
+  /* нет openings.json — оставляем проёмы из project.json */
 }
 
 let saveTimer = null;
@@ -582,6 +601,7 @@ function handleWsMessage(wsClient, msg) {
       walls: Array.isArray(p.walls) ? p.walls : [],
       notes: Array.isArray(p.notes) ? p.notes : [],
       openings: Array.isArray(p.openings) ? p.openings : [],
+      openingsVersion: 1,
       projectTitle: String(p.projectTitle || EMPTY_PROJECT().projectTitle),
       planRotated: !!p.planRotated,
       updatedAt: new Date().toISOString(),
