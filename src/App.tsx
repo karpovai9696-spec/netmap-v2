@@ -627,6 +627,8 @@ export default function App() {
   const [showExistingWalls, setShowExistingWalls] = useState(false);
   const [showUnderlay, setShowUnderlay] = useState(true);
   const [redoStack, setRedoStack] = useState<any[]>([]);
+  const numberEditRef = useRef(false);
+  const dragHistoryRef = useRef(false);
 
   // Уведомление (Toast)
   const triggerToast = (msg) => {
@@ -669,6 +671,7 @@ export default function App() {
     setHistory((prev) => prev.slice(0, -1));
     applySnapshot(last);
     setWallDraft(null);
+    numberEditRef.current = false;
     triggerToast('Действие отменено (Ctrl+Z)');
   };
 
@@ -680,25 +683,46 @@ export default function App() {
     setRedoStack((prev) => prev.slice(0, -1));
     applySnapshot(next);
     setWallDraft(null);
+    numberEditRef.current = false;
     triggerToast('Действие возвращено (Ctrl+Shift+Z)');
+  };
+
+  const beginNumberEdit = () => {
+    if (!numberEditRef.current) {
+      saveHistory();
+      numberEditRef.current = true;
+    }
+  };
+  const endNumberEdit = () => {
+    numberEditRef.current = false;
   };
 
   // Горячие клавиши как в Figma / CAD
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
       const key = e.key.toLowerCase();
+      const target = e.target as HTMLElement;
+      const tag = target?.tagName || '';
+      const inputType = String((target as HTMLInputElement)?.type || '').toLowerCase();
+      // в текстовых полях (поиск, заметки, пароль) оставляем нативный undo,
+      // в числовых/селектах — отменяем действие редактора
+      const nativeTextUndo =
+        tag === 'TEXTAREA' ||
+        (tag === 'INPUT' && !['number', 'range', 'checkbox', 'radio', 'button', 'submit'].includes(inputType));
       if ((e.ctrlKey || e.metaKey) && key === 'z') {
+        if (nativeTextUndo) return;
         e.preventDefault();
         if (e.shiftKey) handleRedo();
         else handleUndo();
         return;
       }
       if ((e.ctrlKey || e.metaKey) && key === 'y') {
+        if (nativeTextUndo) return;
         e.preventDefault();
         handleRedo();
         return;
       }
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return;
       if (key === 'v') setActiveTool('select');
       if (key === 'h') setActiveTool('pan');
       if (key === 'e' && canEditNetwork) setActiveTool('place_node');
@@ -1023,6 +1047,10 @@ export default function App() {
     }
 
     if (draggingItem) {
+      if (!dragHistoryRef.current) {
+        saveHistory();
+        dragHistoryRef.current = true;
+      }
       if (draggingItem.type === 'node') {
         setNodes((prev) =>
           prev.map((n) =>
@@ -1073,6 +1101,8 @@ export default function App() {
   const handleCanvasMouseUp = () => {
     setIsPanning(false);
     setDraggingItem(null);
+    dragHistoryRef.current = false;
+    endNumberEdit();
   };
 
   // Клик или начало перетаскивания узла оборудования
@@ -1112,7 +1142,6 @@ export default function App() {
 
     setSelection({ type: 'node', id: node.id });
     const coords = clientToMeters(e.clientX, e.clientY);
-    saveHistory();
     setDraggingItem({
       type: 'node',
       id: node.id,
@@ -1125,7 +1154,6 @@ export default function App() {
   const startWallEndDrag = (e, wall, end) => {
     e.stopPropagation();
     setSelection({ type: 'wall', id: wall.id });
-saveHistory();
     setDraggingItem({ type: 'wall-end', id: wall.id, end });
   };
 
@@ -1152,7 +1180,6 @@ saveHistory();
     }
 
     const coords = clientToMeters(e.clientX, e.clientY);
-    saveHistory();
     setDraggingItem({
       type: 'wall',
       id: wall.id,
@@ -3745,10 +3772,13 @@ saveHistory();
                     <input
                       type="number" min="0.4" max="4" step="0.05"
                       value={selectedObject.width}
+                      onFocus={() => endNumberEdit()}
                       onChange={(e) => {
+                        beginNumberEdit();
                         const v = Math.max(0.4, Math.min(4, Number(e.target.value) || 0.4));
                         setOpenings((prev) => prev.map((o: any) => (o.id === selectedObject.id ? { ...o, width: v } : o)));
                       }}
+                      onBlur={() => endNumberEdit()}
                       className={`w-full px-2 py-1.5 rounded-lg border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}
                     />
                   </div>
@@ -3807,10 +3837,13 @@ saveHistory();
                     <input
                       type="number" min="0.05" max="0.7" step="0.01"
                       value={selectedObject.thickness}
+                      onFocus={() => endNumberEdit()}
                       onChange={(e) => {
+                        beginNumberEdit();
                         const v = Math.max(0.05, Math.min(0.7, Number(e.target.value) || 0.1));
                         setWalls((prev) => prev.map((w: any) => (w.id === selectedObject.id ? { ...w, thickness: v } : w)));
                       }}
+                      onBlur={() => endNumberEdit()}
                       className={`w-full px-2 py-1.5 rounded-lg border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}
                     />
                   </div>
@@ -3844,10 +3877,13 @@ saveHistory();
                         <span className="flex-1">{o.type === 'door' ? 'Дверь' : o.type === 'window' ? 'Окно' : 'Проём'}, {o.width} м</span>
                         <input
                           type="number" min="0.4" max="4" step="0.05" value={o.width}
+                          onFocus={() => endNumberEdit()}
                           onChange={(e) => {
+                            beginNumberEdit();
                             const v = Math.max(0.4, Math.min(4, Number(e.target.value) || 0.4));
                             setOpenings((prev) => prev.map((x: any) => (x.id === o.id ? { ...x, width: v } : x)));
                           }}
+                          onBlur={() => endNumberEdit()}
                           className={`w-16 px-1 py-0.5 rounded border ${darkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'}`}
                         />
                         <button
