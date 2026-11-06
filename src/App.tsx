@@ -51,6 +51,7 @@ import {
   FileText,
   RotateCw,
   BookOpen,
+  HardHat,
   DoorOpen,
   AppWindow,
   SquareDashed
@@ -77,6 +78,7 @@ import type { ActivityItem } from './Live';
 // Общие габариты здания: 32.46 м (ширина) x 16.21 м (глубина)
 // ============================================================================
 const STORAGE_KEY = 'netmap-v2.project.v1';
+const ENGINEER_MODE_KEY = 'netmap-v2.engineerMode';
 
 const loadSavedProject = (): any | null => {
   try {
@@ -329,6 +331,13 @@ function cleanupPrintSheet() {
 export default function App() {
   // --- Состояния интерфейса ---
   const [darkMode, setDarkMode] = useState(SAVED?.darkMode ?? true);
+  const [engineerMode, setEngineerMode] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(ENGINEER_MODE_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
   const [projectTitle, setProjectTitle] = useState(
     SAVED?.projectTitle ?? 'Карта сети — 1 этаж (Козина 7, пом. 1080 + 1079)'
   );
@@ -496,12 +505,26 @@ export default function App() {
   const DRAW_BBOX = { x: 33, y: 223, w: 993, h: 580 };
   const DRAW_SX = (BUILDING.width * SCALE) / DRAW_BBOX.w;
   const DRAW_SY = (BUILDING.depth * SCALE) / DRAW_BBOX.h;
-  const netReadOnly = collab.mode !== 'demo' && collab.user?.role === 'engineer';
+  const netReadOnly =
+    collab.mode !== 'demo' &&
+    (collab.user?.role === 'engineer' || (collab.user?.role === 'admin' && engineerMode));
+  useEffect(() => {
+    try {
+      localStorage.setItem(ENGINEER_MODE_KEY, engineerMode ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  }, [engineerMode]);
+
   useEffect(() => {
     if (netReadOnly) {
       setActiveTool('wall');
       setActiveLayerId('partitions');
-      triggerToast('Роль инженера: доступны стены, двери, окна, проёмы и пометки');
+      triggerToast(
+        collab.user?.role === 'admin'
+          ? 'Режим инженера включён: сеть скрыта, доступны стены и проёмы'
+          : 'Роль инженера: доступны стены, двери, окна, проёмы и пометки'
+      );
     }
   }, [netReadOnly]);
   const canEditNetwork = !netReadOnly;
@@ -1551,9 +1574,15 @@ export default function App() {
                   user={collab.user}
                   users={collab.users}
                   onLogout={() => {
-                    if (window.confirm('Выйти из системы?')) collab.logout();
+                    if (window.confirm('Выйти из системы?')) {
+                      try { localStorage.removeItem(ENGINEER_MODE_KEY); } catch {}
+                      setEngineerMode(false);
+                      collab.logout();
+                    }
                   }}
                   onChangePassword={() => setShowPassword(true)}
+                  engineerMode={engineerMode}
+                  onToggleEngineerMode={() => setEngineerMode((v) => !v)}
                 />
               ) : (
                 <span className="hidden xl:inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
@@ -1799,6 +1828,23 @@ export default function App() {
           >
             <Undo2 className="w-4 h-4" />
           </button>
+
+          {collab.mode !== 'demo' && collab.user?.role === 'admin' && (
+            <button
+              onClick={() => setEngineerMode((v) => !v)}
+              className={`hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition ${
+                engineerMode
+                  ? 'bg-primary/15 border-primary/50 text-primary'
+                  : darkMode
+                  ? 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+                  : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+              }`}
+              title={engineerMode ? 'Выйти из режима инженера (вернуть права администратора)' : 'Включить режим инженера по сооружениям без ввода пароля'}
+            >
+              <HardHat className="w-3.5 h-3.5" />
+              <span>{engineerMode ? 'Инженер (режим)' : 'Режим инженера'}</span>
+            </button>
+          )}
 
           <button
             onClick={() => setShowWifiHeatmap(!showWifiHeatmap)}
