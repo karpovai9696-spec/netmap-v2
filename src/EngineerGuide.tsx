@@ -1,9 +1,7 @@
 import { useEffect } from 'react';
 import {
-  AppWindow,
   BrickWall,
   CheckCircle2,
-  DoorOpen,
   HardHat,
   HelpCircle,
   Lightbulb,
@@ -11,64 +9,67 @@ import {
   Printer,
   RotateCw,
   Ruler,
-  SquareDashed,
-  Type,
   Undo2,
   WifiOff,
   X,
 } from 'lucide-react';
 
-// Короткие подсказки для строки под панелью инструментов
+// Короткие подсказки для строки под панелью инструментов.
 export const TOOL_HINTS: Record<string, { label: string; hint: string }> = {
   select: {
     label: 'Выбор',
-    hint: 'Редактирование плана — в отдельном «Планировщике» RoomCAD.',
+    hint: 'План редактируется в «Планировщике» RoomCAD; здесь — просмотр плана и сеть.',
   },
   pan: { label: 'Панорама', hint: 'Перетаскивайте план мышью. Колесо мыши — масштаб.' },
-  wall: {
-    label: 'Перегородка',
-    hint: 'Кликните начало и конец. Выделенную стену можно тянуть за линию или за жёлтые маркеры концов.',
-  },
-  door: { label: 'Дверь', hint: 'Кликните по стене, чтобы поставить дверь.' },
-  window: { label: 'Окно', hint: 'Кликните по стене, чтобы поставить окно.' },
-  opening: { label: 'Проём', hint: 'Кликните по стене, чтобы сделать технологический проём.' },
   ruler: { label: 'Линейка', hint: 'Кликните две точки на плане, чтобы измерить расстояние.' },
   note: { label: 'Пометка', hint: 'Кликните по плану, чтобы добавить текстовую пометку.' },
   place_node: { label: 'Узел', hint: 'Кликните по плану, чтобы разместить оборудование.' },
   cable: { label: 'Кабель', hint: 'Кликните начальный, затем конечный узел, чтобы проложить трассу.' },
+  wall: {
+    label: 'Только в RoomCAD',
+    hint: 'Старый редактор стен отключён. Откройте «Планировщик» в шапке.',
+  },
+  door: {
+    label: 'Только в RoomCAD',
+    hint: 'Двери и окна добавляются в планировщике RoomCAD.',
+  },
+  window: {
+    label: 'Только в RoomCAD',
+    hint: 'Двери и окна добавляются в планировщике RoomCAD.',
+  },
+  opening: {
+    label: 'Только в RoomCAD',
+    hint: 'Проёмы добавляются в планировщике RoomCAD.',
+  },
 };
 
 const STEPS = [
   {
     title: 'Откройте планировщик',
-    text: 'Нажмите «Планировщик» в шапке — откроется RoomCAD с вашей учётной записью (единый вход).',
+    text: 'Нажмите «Планировщик» в шапке — RoomCAD откроется с вашей учётной записью, без второго пароля.',
   },
   {
-    title: 'Загрузите подложку',
-    text: 'В RoomCAD нажмите «Подложка» и выберите план. Справа настройте положение, размер и прозрачность.',
+    title: 'План и подложка',
+    text: 'Стены, двери, окна, проёмы и комнаты редактируются в RoomCAD. Растровый чертёж-подложка загружается кнопкой «Подложка»; справа настраиваются положение, размер и прозрачность. Если подложка не нужна — «Удалить подложку».',
   },
   {
-    title: 'Редактируйте план',
-    text: 'Стены, двери, окна, проёмы и комнаты — в RoomCAD. Undo/Redo: Ctrl+Z / Ctrl+Shift+Z.',
+    title: 'Печать и экспорт',
+    text: 'В RoomCAD меню «Экспорт» → «Печать / PDF» (A4 landscape), «Чертёж (.svg)» или «Файл RoomCAD (.rcad)».',
   },
   {
     title: 'Сеть и документация',
-    text: 'Схема сети, оборудование, кабельный журнал и документация остаются в netmap.',
+    text: 'Схема сети, оборудование, кабельный журнал и документация остаются в netmap. Сеть доступна администратору, документация — по роли.',
   },
 ];
 
 const SHORTCUTS: [string, string][] = [
-  ['V', 'Выбор и свойства'],
+  ['V', 'Выбор'],
   ['H', 'Панорама'],
-  ['W', 'Перегородка'],
-  ['D', 'Дверь'],
-  ['O', 'Окно'],
-  ['P', 'Проём'],
   ['M', 'Линейка'],
   ['T', 'Текстовая пометка'],
   ['R', 'Поворот плана 180°'],
   ['Esc', 'Отменить текущий инструмент'],
-  ['Del', 'Удалить выбранное'],
+  ['Del', 'Удалить пометку или объект сети'],
   ['Ctrl+Z', 'Отменить действие'],
   ['Ctrl+Shift+Z', 'Вернуть действие'],
   ['Колесо', 'Масштаб'],
@@ -99,11 +100,11 @@ function Section({
 export function EngineerGuideModal({
   onClose,
   darkMode = true,
-  onStartWall,
+  onOpenPlanner,
 }: {
   onClose: () => void;
   darkMode?: boolean;
-  onStartWall?: () => void;
+  onOpenPlanner?: () => void;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -142,7 +143,7 @@ export function EngineerGuideModal({
             </span>
             <div>
               <h2 className="text-base font-bold leading-tight">Инструкция инженера</h2>
-              <p className="text-[11px] text-slate-400 mt-0.5">План, стены, проёмы и пометки — коротко и по делу</p>
+              <p className="text-[11px] text-slate-400 mt-0.5">Планировка — в RoomCAD, сеть и документация — в netmap</p>
             </div>
           </div>
           <button
@@ -176,36 +177,50 @@ export function EngineerGuideModal({
           </section>
 
           <div className={`p-3 rounded-xl border text-[11px] leading-relaxed ${darkMode ? 'bg-slate-950/70 border-slate-800' : 'bg-blue-50/60 border-blue-100'}`}>
-            <div className="font-semibold text-primary mb-1">Планировка — в RoomCAD</div>
+            <div className="font-semibold text-primary mb-1">Единый вход</div>
             <div className="text-slate-400">
-              Стены, проёмы, комнаты и подложка редактируются в отдельном «Планировщике» (RoomCAD). В netmap остаётся сеть, оборудование, кабельный журнал и документация.
+              Кнопка «Планировщик» открывает RoomCAD в новой вкладке и передаёт вашу сессию. Старый редактор стен в netmap отключён: стены, проёмы и подложка меняются только в RoomCAD.
             </div>
           </div>
 
-          <Section title="Проёмы: дверь, окно, технологический проём" icon={<DoorOpen className="w-4 h-4" />} darkMode={darkMode}>
-            <div className="grid sm:grid-cols-3 gap-2">
-              {[
-                { icon: DoorOpen, label: 'Дверь (D)', text: 'Стандартная ширина 0,9 м. Кликните по стене.' },
-                { icon: AppWindow, label: 'Окно (O)', text: 'Стандартная ширина 1,4 м. Кликните по стене.' },
-                { icon: SquareDashed, label: 'Проём (P)', text: 'Технологический проход 1,1 м. Кликните по стене.' },
-              ].map((p) => {
-                const I = p.icon;
-                return (
-                  <div key={p.label} className={`p-2.5 rounded-xl border ${card}`}>
-                    <div className="flex items-center gap-1.5 text-xs font-semibold">
-                      <I className="w-3.5 h-3.5 text-primary" /> {p.label}
-                    </div>
-                    <div className="text-[10px] text-slate-400 mt-1 leading-relaxed">{p.text}</div>
-                  </div>
-                );
-              })}
+          <Section title="Подложка, печать и совместная работа" icon={<Printer className="w-4 h-4" />} darkMode={darkMode}>
+            <div className="grid sm:grid-cols-2 gap-2">
+              <div className={`p-2.5 rounded-xl border ${card}`}>
+                <div className="flex items-center gap-1.5 text-xs font-semibold">
+                  <BrickWall className="w-3.5 h-3.5 text-primary" /> Подложка
+                </div>
+                <div className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                  В RoomCAD: «Подложка» → выберите файл. Справа задайте X/Z, ширину, длину и прозрачность. «Удалить подложку» убирает серый чертёж, оставляя модель.
+                </div>
+              </div>
+              <div className={`p-2.5 rounded-xl border ${card}`}>
+                <div className="flex items-center gap-1.5 text-xs font-semibold">
+                  <Printer className="w-3.5 h-3.5 text-primary" /> Печать / PDF
+                </div>
+                <div className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                  В RoomCAD меню «Экспорт» → «Печать / PDF». Там же SVG для другого ПО и .rcad для переноса проекта.
+                </div>
+              </div>
+              <div className={`p-2.5 rounded-xl border ${card}`}>
+                <div className="flex items-center gap-1.5 text-xs font-semibold">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> Совместная работа
+                </div>
+                <div className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                  В RoomCAD нажмите «Совместно»: изменения синхронизируются для всех участников и сохраняются на сервере.
+                </div>
+              </div>
+              <div className={`p-2.5 rounded-xl border ${card}`}>
+                <div className="flex items-center gap-1.5 text-xs font-semibold">
+                  <Ruler className="w-3.5 h-3.5 text-primary" /> Сеть
+                </div>
+                <div className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                  В netmap — оборудование, IP/VLAN, кабели, кабельный журнал и документация. У инженера сеть скрыта.
+                </div>
+              </div>
             </div>
-            <p className={`text-[11px] leading-relaxed p-2.5 rounded-xl border ${card}`}>
-              Ширину и тип можно изменить справа после выделения. В одно место нельзя поставить два проёма — появится подсказка. Чтобы удалить проём, выделите его и нажмите Del.
-            </p>
           </Section>
 
-          <Section title="Клавиши и навигация" icon={<MousePointer className="w-4 h-4" />} darkMode={darkMode}>
+          <Section title="Клавиши и навигация в netmap" icon={<MousePointer className="w-4 h-4" />} darkMode={darkMode}>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
               {SHORTCUTS.map(([key, label]) => (
                 <div key={key} className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-[11px] ${card}`}>
@@ -222,11 +237,11 @@ export function EngineerGuideModal({
             </p>
           </Section>
 
-          <Section title="Связь, сохранение и печать" icon={<WifiOff className="w-4 h-4" />} darkMode={darkMode}>
+          <Section title="Связь, сохранение и печать схемы" icon={<WifiOff className="w-4 h-4" />} darkMode={darkMode}>
             <ul className="space-y-1.5 text-[11px] leading-relaxed">
               <li className="flex gap-2">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
-                Изменения сохраняются на сервере и синхронизируются с другими пользователями автоматически.
+                Сеть, оборудование и кабели сохраняются на сервере и синхронизируются с другими администраторами.
               </li>
               <li className="flex gap-2">
                 <WifiOff className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
@@ -234,17 +249,17 @@ export function EngineerGuideModal({
               </li>
               <li className="flex gap-2">
                 <Printer className="w-3.5 h-3.5 text-primary shrink-0 mt-0.5" />
-                Печать и экспорт — в меню «Экспорт» в шапке: печать листа A4, сохранение проекта в JSON.
+                Меню «Экспорт» в netmap печатает схему сети и кабельный журнал. Печать планировки — в RoomCAD.
               </li>
               <li className="flex gap-2">
                 <RotateCw className="w-3.5 h-3.5 text-primary shrink-0 mt-0.5" />
-                Если чертёж неудобно читать, нажмите R или кнопку поворота внизу справа — план перевернётся на 180°, подписи останутся читаемыми.
+                Поворот плана на 180° — клавиша R или кнопка ⟲ внизу справа; на печать планировки это не влияет.
               </li>
             </ul>
           </Section>
 
           <div className={`p-3 rounded-xl border text-[11px] leading-relaxed ${darkMode ? 'bg-primary/5 border-primary/20 text-slate-300' : 'bg-amber-50 border-amber-200 text-slate-700'}`}>
-            <b>Важно:</b> капитальные и несущие стены защищены от удаления — можно удалять только перегородки. Если объект не выделяется, нажмите Esc и выберите инструмент «Выбор» (V).
+            <b>Важно:</b> в netmap больше нельзя рисовать и удалять стены, ставить двери/окна/проёмы. Все изменения планировки — в RoomCAD; здесь план нужен для привязки сети и документов.
           </div>
         </div>
 
@@ -254,12 +269,12 @@ export function EngineerGuideModal({
             Инструкция всегда доступна по кнопке «?» в шапке
           </div>
           <div className="flex items-center gap-2">
-            {onStartWall && (
+            {onOpenPlanner && (
               <button
-                onClick={onStartWall}
-                className="px-3 py-1.5 rounded-lg bg-primary text-ink-950 text-xs font-bold hover:opacity-90 transition"
+                onClick={onOpenPlanner}
+                className="px-3 py-1.5 rounded-lg bg-primary text-ink-950 text-xs font-bold hover:opacity-90 transition flex items-center gap-1.5"
               >
-                Начать со стены
+                <BrickWall className="w-3.5 h-3.5" /> Открыть планировщик
               </button>
             )}
             <button

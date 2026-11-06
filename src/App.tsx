@@ -3345,7 +3345,7 @@ export default function App() {
                       ? 'bg-blue-600/10 border-blue-500/40 text-blue-600 dark:text-blue-400'
                       : 'border-slate-200 dark:border-slate-700 text-slate-400'
                   }`}
-                  title="Показать/скрыть существующие стены модели (сняты с актуального чертежа), чтобы их можно было редактировать и удалять"
+                  title="Показать/скрыть стены модели для просмотра и привязки сети; редактирование — в RoomCAD"
                 >
                   {showExistingWalls ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
                   Стены модели
@@ -4008,10 +4008,9 @@ export default function App() {
         <EngineerGuideModal
           darkMode={darkMode}
           onClose={() => setShowGuide(false)}
-          onStartWall={() => {
-            setActiveTool('wall');
-            setActiveLayerId('partitions');
+          onOpenPlanner={() => {
             setShowGuide(false);
+            openPlanner();
           }}
         />
       )}
