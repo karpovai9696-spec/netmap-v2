@@ -616,6 +616,9 @@ export default function App() {
   const [mouseMeters, setMouseMeters] = useState({ x: 15.0, y: 6.0 });
   const [rulerPoints, setRulerPoints] = useState(null); // { x1, y1, x2, y2, active }
   const [wallDraft, setWallDraft] = useState(null); // { x1, y1, x2, y2 }
+  const [showExistingWalls, setShowExistingWalls] = useState(true);
+  const [showUnderlay, setShowUnderlay] = useState(true);
+  const [redoStack, setRedoStack] = useState<any[]>([]);
 
   // Уведомление (Toast)
   const triggerToast = (msg) => {
@@ -623,28 +626,53 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 3200);
   };
 
-  // Сохранение снимка в историю перед изменением
+  // Сохранение снимка в историю перед изменением (Undo/Redo)
+  const snapshot = () =>
+    JSON.parse(
+      JSON.stringify({
+        nodes,
+        cables,
+        walls,
+        openings,
+        notes,
+      })
+    );
+
+  const applySnapshot = (snap: any) => {
+    if (!snap) return;
+    setNodes(snap.nodes || []);
+    setCables(snap.cables || []);
+    setWalls(snap.walls || []);
+    setOpenings(snap.openings || []);
+    setNotes(snap.notes || []);
+  };
+
   const saveHistory = () => {
-    setHistory((prev) => [
-      ...prev.slice(-15),
-      {
-        nodes: JSON.parse(JSON.stringify(nodes)),
-        cables: JSON.parse(JSON.stringify(cables)),
-        walls: JSON.parse(JSON.stringify(walls)),
-        openings: JSON.parse(JSON.stringify(openings)),
-      }
-    ]);
+    const snap = snapshot();
+    setHistory((prev) => [...prev.slice(-29), snap]);
+    setRedoStack([]); // новое действие обрывает ветку redo
   };
 
   const handleUndo = () => {
     if (history.length === 0) return;
     const last = history[history.length - 1];
-    setNodes(last.nodes);
-    setCables(last.cables);
-    setWalls(last.walls);
-    setOpenings(last.openings || []);
+    const current = snapshot();
+    setRedoStack((prev) => [...prev.slice(-29), current]);
     setHistory((prev) => prev.slice(0, -1));
-    triggerToast('Действие отменено (Undo)');
+    applySnapshot(last);
+    setWallDraft(null);
+    triggerToast('Действие отменено (Ctrl+Z)');
+  };
+
+  const handleRedo = () => {
+    if (redoStack.length === 0) return;
+    const next = redoStack[redoStack.length - 1];
+    const current = snapshot();
+    setHistory((prev) => [...prev.slice(-29), current]);
+    setRedoStack((prev) => prev.slice(0, -1));
+    applySnapshot(next);
+    setWallDraft(null);
+    triggerToast('Действие возвращено (Ctrl+Shift+Z)');
   };
 
   // Горячие клавиши как в Figma / CAD
@@ -652,6 +680,17 @@ export default function App() {
     const handleKeyDown = (e) => {
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
       const key = e.key.toLowerCase();
+      if ((e.ctrlKey || e.metaKey) && key === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) handleRedo();
+        else handleUndo();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && key === 'y') {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
       if (key === 'v') setActiveTool('select');
       if (key === 'h') setActiveTool('pan');
       if (key === 'e' && canEditNetwork) setActiveTool('place_node');
@@ -681,7 +720,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [Selection, nodes, cables, walls, canEditNetwork, netReadOnly, collab.user]);
+  }, [Selection, nodes, cables, walls, canEditNetwork, netReadOnly, collab.user, history, redoStack]);
 
   // Перевод экранных координат мыши в метры здания
   const clientToMeters = (clientX, clientY) => {
@@ -771,7 +810,7 @@ export default function App() {
   useEffect(() => {
     (window as any).__netmapV2 = {
       counts: () => ({ nodes: nodes.length, cables: cables.length, walls: walls.length, layers: layers.length }),
-      state: () => ({ nodes, cables, walls, layers, notes, openings, projectTitle, darkMode, zoom, pan, selection: Selection, activeTool }),
+      state: () => ({ nodes, cables, walls, layers, notes, openings, projectTitle, darkMode, zoom, pan, selection: Selection, activeTool, historyLength: history.length, redoLength: redoStack.length }),
       screenOf: (x: number, y: number) => {
         const r = svgRef.current?.getBoundingClientRect();
         if (!r) return { x: 0, y: 0 };
@@ -784,7 +823,7 @@ export default function App() {
         return { x: r.left + pan.x + px * zoom, y: r.top + pan.y + py * zoom };
       },
     };
-  }, [nodes, cables, walls, layers, notes, openings, projectTitle, darkMode, zoom, pan, planRotated, Selection, activeTool]);
+  }, [nodes, cables, walls, layers, notes, openings, projectTitle, darkMode, zoom, pan, planRotated, Selection, activeTool, history, redoStack]);
 
   // --- Проёмы: двери, окна, технологические проёмы ---
   const OPENING_DEFAULTS: Record<string, { width: number; height: number }> = {
@@ -797,7 +836,7 @@ export default function App() {
     const L = wallLen(w);
     return [w.x1 + ((w.x2 - w.x1) * t) / L, w.y1 + ((w.y2 - w.y1) * t) / L];
   };
-  const visibleWalls = () => walls.filter((w: any) => !showDrawingPlan || w.custom);
+  const visibleWalls = () => walls.filter((w: any) => !showDrawingPlan || w.custom || showExistingWalls);
   const wallAtPoint = (x: number, y: number) => {
     let best: any = null;
     for (const w of visibleWalls()) {
@@ -984,6 +1023,19 @@ export default function App() {
               : n
           )
         );
+      } else if (draggingItem.type === 'wall-end') {
+        setWalls((prev) =>
+          prev.map((w) =>
+            w.id === draggingItem.id
+              ? {
+                  ...w,
+                  ...(draggingItem.end === 1
+                    ? { x1: Math.round(coords.x * 20) / 20, y1: Math.round(coords.y * 20) / 20 }
+                    : { x2: Math.round(coords.x * 20) / 20, y2: Math.round(coords.y * 20) / 20 }),
+                }
+              : w
+          )
+        );
       } else if (draggingItem.type === 'wall') {
         const dx = coords.x - draggingItem.startX;
         const dy = coords.y - draggingItem.startY;
@@ -1052,12 +1104,25 @@ export default function App() {
 
     setSelection({ type: 'node', id: node.id });
     const coords = clientToMeters(e.clientX, e.clientY);
+    saveHistory();
     setDraggingItem({
       type: 'node',
       id: node.id,
       offsetX: coords.x - node.x,
       offsetY: coords.y - node.y
     });
+  };
+
+  // Изменение конца стены (перетаскивание за маркер)
+  const startWallEndDrag = (e, wall, end) => {
+    e.stopPropagation();
+    setSelection({ type: 'wall', id: wall.id });
+    if (wall.loadBearing) {
+      triggerToast('Несущую стену нельзя менять — только удалить');
+      return;
+    }
+    saveHistory();
+    setDraggingItem({ type: 'wall-end', id: wall.id, end });
   };
 
   // Клик или перетаскивание стены/перегородки
@@ -1086,6 +1151,7 @@ export default function App() {
     }
 
     const coords = clientToMeters(e.clientX, e.clientY);
+    saveHistory();
     setDraggingItem({
       type: 'wall',
       id: wall.id,
@@ -1105,6 +1171,13 @@ export default function App() {
       return;
     }
     if (!Selection?.id) return;
+    if (Selection.type === 'wall') {
+      const target = walls.find((w) => w.id === Selection.id);
+      if (target?.loadBearing) {
+        const ok = window.confirm('Это несущая/капитальная стена. Удалить её из плана?');
+        if (!ok) return;
+      }
+    }
     saveHistory();
     if (Selection.type === 'node') {
       setNodes((prev) => prev.filter((n) => n.id !== Selection.id));
@@ -1114,14 +1187,9 @@ export default function App() {
       setCables((prev) => prev.filter((c) => c.id !== Selection.id));
       triggerToast('Кабельная трасса удалена');
     } else if (Selection.type === 'wall') {
-      const targetWall = walls.find((w) => w.id === Selection.id);
-      if (targetWall?.loadBearing) {
-        triggerToast('Несущую конструкцию удалить нельзя!');
-        return;
-      }
       setWalls((prev) => prev.filter((w) => w.id !== Selection.id));
       setOpenings((prev) => prev.filter((o: any) => o.wallId !== Selection.id));
-      triggerToast('Перегородка демонтирована');
+      triggerToast('Стена удалена с плана');
     } else if (Selection.type === 'opening') {
       setOpenings((prev) => prev.filter((o: any) => o.id !== Selection.id));
       triggerToast('Проём удалён');
@@ -1832,6 +1900,21 @@ export default function App() {
           </button>
 
           <button
+            onClick={handleRedo}
+            disabled={redoStack.length === 0}
+            className={`p-1.5 rounded-lg border transition ${
+              redoStack.length === 0
+                ? 'opacity-40 cursor-not-allowed border-transparent'
+                : darkMode
+                ? 'border-slate-800 hover:bg-slate-800 text-slate-300'
+                : 'border-slate-200 hover:bg-slate-100 text-slate-600'
+            }`}
+            title="Вернуть (Ctrl+Shift+Z)"
+          >
+            <Redo2 className="w-4 h-4" />
+          </button>
+
+          <button
             onClick={handleUndo}
             disabled={history.length === 0}
             className={`p-1.5 rounded-lg border transition ${
@@ -2503,7 +2586,7 @@ export default function App() {
                 )}
 
                 {/* 2. ПОДЛОЖКА: верный чертёж (SVG) или старая векторная модель */}
-                {showDrawingPlan && (
+                {showDrawingPlan && showUnderlay && (
                   <image
                     href={planDrawingUrl}
                     x={-DRAW_BBOX.x * DRAW_SX}
@@ -2563,9 +2646,11 @@ export default function App() {
                   })}
 
                   {/* СТЕНА И ПЕРЕГОРОДКИ (НЕСУЩИЕ + РЕДАКТИРУЕМЫЕ) */}
-                  {walls.map((w) => {
+                  {[...walls]
+                    .sort((a: any, b: any) => (a.id === Selection?.id ? 1 : 0) - (b.id === Selection?.id ? 1 : 0))
+                    .map((w) => {
                     const isSelected = Selection?.type === 'wall' && Selection?.id === w.id;
-                    if (showDrawingPlan && !w.custom) return null;
+                    if (showDrawingPlan && !w.custom && !showExistingWalls) return null;
                     const partLayer = layers.find((l) => l.id === 'partitions');
                     if (!w.loadBearing && !partLayer?.visible) return null;
 
@@ -2581,6 +2666,7 @@ export default function App() {
                       ? '#6B6552'
                       : '#8F8A6E';
 
+                    const baseOpacity = isSelected ? 1 : showDrawingPlan && !w.custom ? 0.5 : 1;
                     const lengthM = Math.round(Math.hypot(w.x2 - w.x1, w.y2 - w.y1) * 100) / 100;
                     const L = Math.max(0.001, Math.hypot(w.x2 - w.x1, w.y2 - w.y1));
                     const wallOpenings = openings
@@ -2599,6 +2685,7 @@ export default function App() {
                     return (
                       <g
                         key={w.id}
+                        opacity={baseOpacity}
                         onMouseDown={(e) => handleWallMouseDown(e, w)}
                         className={w.loadBearing ? 'cursor-pointer' : 'cursor-move'}
                       >
@@ -2678,7 +2765,32 @@ export default function App() {
                           );
                         })}
                         {/* Размер перегородки при выделении или в режиме редактора стен */}
-                        {(isSelected || (viewMode === 'walls' && !w.loadBearing && lengthM >= 1.2)) && (
+                        {isSelected && !w.loadBearing && (
+                          <>
+                            <circle
+                              cx={w.x1 * SCALE}
+                              cy={w.y1 * SCALE}
+                              r={Math.max(4, 6 / Math.max(0.35, zoom))}
+                              fill="#FCD116"
+                              stroke="#111827"
+                              strokeWidth="1.5"
+                              style={{ cursor: 'crosshair' }}
+                              onMouseDown={(e) => startWallEndDrag(e, w, 1)}
+                            />
+                            <circle
+                              cx={w.x2 * SCALE}
+                              cy={w.y2 * SCALE}
+                              r={Math.max(4, 6 / Math.max(0.35, zoom))}
+                              fill="#FCD116"
+                              stroke="#111827"
+                              strokeWidth="1.5"
+                              style={{ cursor: 'crosshair' }}
+                              onMouseDown={(e) => startWallEndDrag(e, w, 2)}
+                            />
+                          </>
+                        )}
+
+                        {(isSelected || (viewMode === 'walls' && w.custom && !w.loadBearing && lengthM >= 1.2)) && (
                           <text
                             x={((w.x1 + w.x2) / 2) * SCALE}
                             y={((w.y1 + w.y2) / 2) * SCALE - 5}
@@ -3089,7 +3201,7 @@ export default function App() {
               </span>
               <span className="text-slate-300 dark:text-slate-700 hidden md:inline">|</span>
               <span className="hidden md:inline text-slate-400">
-                Колесо — зум • Зажать ЛКМ/Пробел — панорама • Del — удалить
+                Колесо — зум • Del — удалить • Ctrl+Z — отмена • Ctrl+Shift+Z — вернуть
               </span>
               {netReadOnly && (
                 <span className="hidden lg:inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[10px] font-medium">
@@ -3185,6 +3297,34 @@ export default function App() {
                     Все
                   </button>
                 </div>
+              </div>
+
+              {/* Отображение подложки и старых стен */}
+              <div className="flex items-center gap-1.5 mb-2">
+                <button
+                  onClick={() => setShowExistingWalls((v) => !v)}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-medium transition ${
+                    showExistingWalls
+                      ? 'bg-blue-600/10 border-blue-500/40 text-blue-600 dark:text-blue-400'
+                      : 'border-slate-200 dark:border-slate-700 text-slate-400'
+                  }`}
+                  title="Показать/скрыть существующие стены из модели, чтобы их можно было редактировать и удалять"
+                >
+                  {showExistingWalls ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                  Старые стены
+                </button>
+                <button
+                  onClick={() => setShowUnderlay((v) => !v)}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-medium transition ${
+                    showUnderlay
+                      ? 'bg-blue-600/10 border-blue-500/40 text-blue-600 dark:text-blue-400'
+                      : 'border-slate-200 dark:border-slate-700 text-slate-400'
+                  }`}
+                  title="Показать/скрыть подложку-чертёж (старые стены остаются)"
+                >
+                  {showUnderlay ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                  Чертёж
+                </button>
               </div>
 
               {/* Список слоев */}
