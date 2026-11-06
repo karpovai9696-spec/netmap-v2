@@ -102,6 +102,8 @@ const CEILING_HEIGHT = 3.96; // h = 3.96м по паспорту БТИ
 // ============================================================================
 const INITIAL_ROOMS = PLAN_ROOMS;
 const INITIAL_WALLS = DRAWING_WALLS;
+// Редактор стен перенесён в RoomCAD; в netmap остаётся сеть и документация.
+const PLAN_EDITOR_EXTERNAL = true;
 // если в localStorage осталась старая CSV-модель (id вида A-W/B-W) — заменяем её на модель с чертежа
 const SAVED_WALLS = (() => {
   const saved = Array.isArray(SAVED?.walls) ? SAVED.walls : null;
@@ -518,6 +520,13 @@ export default function App() {
   const netReadOnly =
     collab.mode !== 'demo' &&
     (collab.user?.role === 'engineer' || (collab.user?.role === 'admin' && engineerMode));
+
+  const openPlanner = () => {
+    let token: string | null = null;
+    try { token = localStorage.getItem('netmap-v2.auth.v2'); } catch { /* ignore */ }
+    const url = `http://${location.hostname}:8093/` + (token ? `#sso=${encodeURIComponent(token)}` : '');
+    window.open(url, '_blank', 'noopener');
+  };
   useEffect(() => {
     try {
       localStorage.setItem(ENGINEER_MODE_KEY, engineerMode ? '1' : '0');
@@ -527,13 +536,17 @@ export default function App() {
   }, [engineerMode]);
 
   useEffect(() => {
+    if (viewMode === 'walls') setViewMode('network');
+  }, [viewMode]);
+
+  useEffect(() => {
     if (netReadOnly) {
-      setActiveTool('wall');
+      setActiveTool('select');
       setActiveLayerId('partitions');
       triggerToast(
         collab.user?.role === 'admin'
-          ? 'Режим инженера включён: сеть скрыта, доступны стены и проёмы'
-          : 'Роль инженера: доступны стены, двери, окна, проёмы и пометки'
+          ? 'Режим инженера включён: сеть скрыта, планировка — в «Планировщике»'
+          : 'Роль инженера: планировка — в «Планировщике», сеть скрыта'
       );
     }
   }, [netReadOnly]);
@@ -921,6 +934,11 @@ export default function App() {
 
     const coords = clientToMeters(e.clientX, e.clientY);
 
+    if (PLAN_EDITOR_EXTERNAL && ['wall', 'door', 'window', 'opening'].includes(activeTool)) {
+      triggerToast('Редактирование плана перенесено в «Планировщик»');
+      return;
+    }
+
     // Установка проёма (дверь / окно / технологический проём)
     if (activeTool === 'door' || activeTool === 'window' || activeTool === 'opening') {
       const hit = wallAtPoint(coords.x, coords.y);
@@ -1153,6 +1171,7 @@ export default function App() {
   // Изменение конца стены (перетаскивание за маркер)
   const startWallEndDrag = (e, wall, end) => {
     e.stopPropagation();
+    if (PLAN_EDITOR_EXTERNAL) return;
     setSelection({ type: 'wall', id: wall.id });
     setDraggingItem({ type: 'wall-end', id: wall.id, end });
   };
@@ -1160,6 +1179,10 @@ export default function App() {
   // Клик или перетаскивание стены/перегородки
   const handleWallMouseDown = (e, wall) => {
     e.stopPropagation();
+    if (PLAN_EDITOR_EXTERNAL) {
+      setSelection({ type: 'wall', id: wall.id });
+      return;
+    }
     // в режиме проёма клик по стене должен ставить дверь/окно/проём
     if (activeTool === 'door' || activeTool === 'window' || activeTool === 'opening') {
       const coords = clientToMeters(e.clientX, e.clientY);
@@ -1194,6 +1217,10 @@ export default function App() {
 
   // Удаление выбранного элемента
   const handleDeleteSelected = () => {
+    if (PLAN_EDITOR_EXTERNAL && (Selection.type === 'wall' || Selection.type === 'opening')) {
+      triggerToast('Редактирование плана — в «Планировщике»');
+      return;
+    }
     if (netReadOnly && Selection.type !== 'wall' && Selection.type !== 'note' && Selection.type !== 'opening') {
       triggerToast('Нет прав: сеть редактирует администратор');
       return;
@@ -1867,23 +1894,6 @@ export default function App() {
             <span>{netReadOnly ? 'План' : 'Схема СКС'}</span>
           </button>
 
-          <button
-            onClick={() => {
-              setViewMode('walls');
-              setActiveTool('wall');
-              setShowExistingWalls(true);
-              setShowUnderlay(false);
-            }}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition ${
-              viewMode === 'walls'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-            }`}
-          >
-            <BrickWall className="w-3.5 h-3.5" />
-            <span>Редактор стен</span>
-          </button>
-
           {!netReadOnly && (
           <button
             onClick={() => setViewMode('bom')}
@@ -1927,6 +1937,17 @@ export default function App() {
             <HelpCircle className="w-4 h-4" />
             <span className="hidden lg:inline">{netReadOnly ? 'Как работать' : 'Инструкция'}</span>
           </button>
+
+          {collab.mode !== 'demo' && (
+            <button
+              onClick={openPlanner}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-primary/50 bg-primary/10 text-primary hover:bg-primary/20 transition"
+              title="Открыть планировщик RoomCAD (отдельный редактор плана)"
+            >
+              <BrickWall className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Планировщик</span>
+            </button>
+          )}
 
           <button
             onClick={handleRedo}
@@ -2337,46 +2358,19 @@ export default function App() {
               {netReadOnly && (
                 <div className="space-y-3">
                   <div className="px-1">
-                    <div className="text-[10px] font-bold tracking-wider uppercase text-slate-400">Инженер: стены и проёмы</div>
+                    <div className="text-[10px] font-bold tracking-wider uppercase text-slate-400">Инженер: планировка</div>
                     <div className="text-[10px] text-slate-500 mt-1 leading-snug">
-                      Чертите перегородки, ставьте двери, окна и проёмы. Сеть и оборудование доступны только администратору.
+                      Стены, двери, окна и проёмы редактируются в отдельном планировщике RoomCAD. Сеть и оборудование скрыты — это зона администратора.
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {[
-                      { id: 'select', label: 'Выбор', icon: MousePointer },
-                      { id: 'wall', label: 'Перегородка', icon: BrickWall },
-                      { id: 'door', label: 'Дверь', icon: DoorOpen },
-                      { id: 'window', label: 'Окно', icon: AppWindow },
-                      { id: 'opening', label: 'Проём', icon: SquareDashed },
-                      { id: 'ruler', label: 'Линейка', icon: Ruler },
-                      { id: 'note', label: 'Текст', icon: Type },
-                    ].map((t: any) => {
-                      const I = t.icon;
-                      const act = activeTool === t.id;
-                      return (
-                        <button
-                          key={t.id}
-                          onClick={() => { setActiveTool(t.id); setWallDraft(null); }}
-                          className={`flex items-center gap-1.5 px-2 py-1.5 rounded-xl border text-[11px] transition ${act ? 'bg-blue-600 text-white border-blue-600' : darkMode ? 'bg-slate-800/60 border-slate-800 hover:bg-slate-800' : 'bg-slate-50 border-slate-200 hover:bg-white'}`}
-                        >
-                          <I className="w-3.5 h-3.5" />
-                          <span>{t.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div className={`p-3 rounded-xl border text-[11px] leading-relaxed space-y-1.5 ${darkMode ? 'bg-slate-950/70 border-slate-800 text-slate-400' : 'bg-blue-50/60 border-blue-100 text-slate-600'}`}>
-                    <div className="font-semibold text-blue-600 dark:text-blue-400">Три шага</div>
-                    <div>1. <b>Стена:</b> W → клик в начале и в конце.</div>
-                    <div>2. <b>Проём:</b> D / O / P → клик по стене.</div>
-                    <div>3. <b>Свойства:</b> V → выделить объект, справа толщина/ширина.</div>
-                    <button
-                      onClick={() => setShowGuide(true)}
-                      className="mt-1 inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 font-semibold hover:underline"
-                    >
-                      <HelpCircle className="w-3.5 h-3.5" /> Открыть инструкцию
-                    </button>
+                  <button
+                    onClick={openPlanner}
+                    className="w-full py-2.5 px-3 rounded-xl bg-primary text-ink-950 font-bold flex items-center justify-center gap-2 hover:opacity-90 transition"
+                  >
+                    <BrickWall className="w-4 h-4" /> Открыть планировщик
+                  </button>
+                  <div className={`p-3 rounded-xl border text-[11px] leading-relaxed ${darkMode ? 'bg-slate-950/70 border-slate-800 text-slate-400' : 'bg-blue-50/60 border-blue-100 text-slate-600'}`}>
+                    В планировщике есть загрузка подложки, стены, проёмы, комнаты, печать и совместная работа. Здесь остаётся просмотр плана для сети.
                   </div>
                 </div>
               )}
@@ -2465,6 +2459,7 @@ export default function App() {
                 { id: 'ruler', label: 'Линейка', shortcut: 'M', icon: Ruler },
                 { id: 'note', label: 'Текст', shortcut: 'T', icon: Type },
               ]
+                .filter((t) => !['wall', 'door', 'window', 'opening'].includes(t.id))
                 .filter((t) => !netReadOnly || (t.id !== 'place_node' && t.id !== 'cable'))
                 .map((t) => {
                 const IconComp = t.icon;
@@ -2801,7 +2796,7 @@ export default function App() {
                           );
                         })}
                         {/* Размер перегородки при выделении или в режиме редактора стен */}
-                        {isSelected && (
+                        {isSelected && !PLAN_EDITOR_EXTERNAL && (
                           <>
                             <circle
                               cx={w.x1 * SCALE}
@@ -3726,7 +3721,7 @@ export default function App() {
                     </div>
                   );
                 })()
-              ) : Selection.type === 'opening' && selectedObject ? (
+              ) : !PLAN_EDITOR_EXTERNAL && Selection.type === 'opening' && selectedObject ? (
                 /* ИНСПЕКТОР ПРОЁМА (ДВЕРЬ / ОКНО / ПРОЁМ) */
                 <div className="space-y-3 text-xs">
                   <div className="flex items-center justify-between">
@@ -3783,7 +3778,7 @@ export default function App() {
                     />
                   </div>
                 </div>
-              ) : Selection.type === 'wall' && selectedObject ? (
+              ) : !PLAN_EDITOR_EXTERNAL && Selection.type === 'wall' && selectedObject ? (
                 /* ИНСПЕКТОР ВЫБРАННОЙ СТЕНЫ ИЛИ ПЕРЕГОРОДКИ */
                 <div className="space-y-3 text-xs">
                   <div className="flex items-center justify-between">
@@ -3896,6 +3891,21 @@ export default function App() {
                       </div>
                     ))}
                   </div>
+                </div>
+              ) : PLAN_EDITOR_EXTERNAL && (Selection.type === 'wall' || Selection.type === 'opening') ? (
+                <div className="space-y-3 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-blue-600">Планировка</span>
+                    <span className="text-[11px] font-semibold text-blue-600">Козина, 7</span>
+                  </div>
+                  <div className={`p-3 rounded-xl border ${darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                    <div className="text-[11px] leading-relaxed text-slate-400">
+                      Стены, двери, окна и проёмы теперь редактируются в отдельном планировщике RoomCAD.
+                    </div>
+                  </div>
+                  <button onClick={openPlanner} className="w-full py-2 px-3 rounded-xl bg-primary text-ink-950 font-bold flex items-center justify-center gap-2">
+                    <BrickWall className="w-3.5 h-3.5" /> Открыть планировщик
+                  </button>
                 </div>
               ) : netReadOnly ? (
                 /* СВОДКА ДЛЯ ИНЖЕНЕРА */
