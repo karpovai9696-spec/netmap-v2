@@ -4008,10 +4008,14 @@ export default function App() {
         <EngineerGuideModal
           darkMode={darkMode}
           onClose={() => setShowGuide(false)}
-          onOpenPlanner={() => {
-            setShowGuide(false);
-            openPlanner();
-          }}
+          onOpenPlanner={
+            collab.mode === 'demo'
+              ? undefined
+              : () => {
+                  setShowGuide(false);
+                  openPlanner();
+                }
+          }
         />
       )}
       {showPassword && (
